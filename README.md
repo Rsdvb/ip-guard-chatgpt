@@ -4,7 +4,7 @@
 
 面向 Windows 的公网 IPv4 防护工具。为 Claude 和 ChatGPT 分别锁定允许的服务出口 IPv4，在应用启动前校验，运行期间持续监测；地址异常时结束受保护进程树。配套 Chrome / Edge 扩展保护相应服务的网页。
 
-本仓库为 **0.12.0 Windows 修改版**，支持 Claude / ChatGPT 独立 IP、启停与阻断、独立诊断、ChatGPT 安装识别与默认管理员启动。基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`。安装包见本仓库 Releases；随附的本地构建未绑定自动更新源。
+本仓库为 **0.12.1 Windows 修改版**，支持 Claude / ChatGPT 独立 IP、启停与阻断、独立诊断、ChatGPT 安装识别与默认管理员启动。基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`。安装包见本仓库 Releases；随附的本地构建未绑定自动更新源。
 
 验证情况：单元、浏览器端到端和 Windows 原生规则测试覆盖独立授权、暂停、配置迁移及并行检测。真实 Claude / ChatGPT Desktop 的网络切换阻断和安装/卸载恢复仍需安装后实测。安装包未签名；本次不含 Mac 移植。
 
@@ -119,7 +119,7 @@ Claude / ChatGPT Desktop 更新后可能更换 MSIX 版本目录。更新前解�
 3. 开启「开发者模式」，点击「加载已解压的扩展」，选择上述目录。
 4. 保持 IP Guard 运行并锁定地址；在扩展中选择对应服务，显示「校验通过」后打开它。
 
-也可加载 Releases 中扩展 ZIP 解压后的目录。网页阻断时会切换到本地结果页；条件恢复后，点击「返回 Claude」。无痕 / InPrivate 使用需要在扩展详情中单独允许。
+也可加载 Releases 中扩展 ZIP 解压后的目录。网页阻断时会切换到本地结果页；条件恢复后，点击「返回 Claude / ChatGPT」。0.12.1 修复了显示通过后返回仍跳回检测页的问题；已安装 0.12.0 桌面版可只更新扩展 ZIP，无需重装桌面版。无痕 / InPrivate 使用需要在扩展详情中单独允许。
 
 设置页显示「未安装」「已安装」「正在运行」或「状态未知」。标准 Chrome / Edge 用户目录中的安装记录用于识别已安装状态，实时宿主连接用于识别正在运行；页面可见时每 5 秒刷新，恢复焦点立即刷新。自定义用户目录中的扩展建立连接后也会显示正在运行。
 

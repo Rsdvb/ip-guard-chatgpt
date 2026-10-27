@@ -60,7 +60,11 @@ function publish() {
                   id: 100,
                   priority: 1000,
                   action: { type: chrome.declarativeNetRequest.RuleActionType.ALLOW },
-                  condition: { requestDomains: domains },
+                  condition: {
+                    requestDomains: domains,
+                    // Omitting resource types excludes main_frame, so navigation keeps redirecting.
+                    resourceTypes: Object.values(chrome.declarativeNetRequest.ResourceType),
+                  },
                 },
               ]
             : [],

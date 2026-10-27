@@ -5,7 +5,7 @@ export { formatIPText } from "./ip-display.ts";
 export * from "./services.ts";
 export * from "./browser-policy.ts";
 
-export const nativeVersion = "0.12.0";
+export const nativeVersion = "0.12.1";
 export const nativeProtocol = 10;
 export const browserExtensionId = "blmgamidelconfabgilaacbkokomegep";
 export const browserHostName = "com.ipguard.browser";
