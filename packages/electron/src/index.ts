@@ -5,7 +5,7 @@ export { formatIPText } from "./ip-display.ts";
 export * from "./services.ts";
 export * from "./browser-policy.ts";
 
-export const nativeVersion = "0.11.0";
+export const nativeVersion = "0.11.1";
 export const nativeProtocol = 9;
 export const browserExtensionId = "blmgamidelconfabgilaacbkokomegep";
 export const browserHostName = "com.ipguard.browser";
@@ -83,14 +83,15 @@ export const appPresetSchema = z.object({
   message: z.string(),
 });
 export type AppPreset = z.infer<typeof appPresetSchema>;
-export const claudeStateSchema = z.object({
+export const processStateSchema = z.object({
+  service: serviceSchema,
   phase: z.enum(["running", "stopped", "unknown"]),
   count: z.number().int().nonnegative(),
   canStop: z.boolean(),
   message: z.string(),
   checkedAt: z.string(),
 });
-export type ClaudeState = z.infer<typeof claudeStateSchema>;
+export type ProcessState = z.infer<typeof processStateSchema>;
 export const updateStateSchema = z.object({
   phase: z.enum([
     "unconfigured",
@@ -187,8 +188,8 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("presets") }),
   z.object({ action: z.literal("adapter:set"), adapterId: z.string().max(256) }),
   z.object({ action: z.literal("ip:current"), service: serviceSchema }),
-  z.object({ action: z.literal("claude:status") }),
-  z.object({ action: z.literal("claude:stop") }),
+  z.object({ action: z.literal("process:status"), service: serviceSchema }),
+  z.object({ action: z.literal("process:stop"), service: serviceSchema }),
   z.object({ action: z.literal("logs") }),
   z.object({ action: z.literal("elevate") }),
   z.object({ action: z.literal("restart") }),
@@ -213,7 +214,7 @@ export const replySchema = z.object({
   diagnostics: coffeeReportSchema.optional(),
   presets: z.array(appPresetSchema).optional(),
   ipv4: ipv4Schema.optional(),
-  claude: claudeStateSchema.optional(),
+  processes: processStateSchema.optional(),
   appUpdate: updateStateSchema.optional(),
   extension: extensionStatusSchema.optional(),
 });

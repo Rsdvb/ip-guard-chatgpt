@@ -4,7 +4,7 @@
 
 面向 Windows 的公网 IPv4 防护工具。为 Claude 和 ChatGPT 分别锁定允许的服务出口 IPv4，在应用启动前校验，运行期间持续监测；地址异常时结束受保护进程树。配套 Chrome / Edge 扩展保护相应服务的网页。
 
-本仓库为 **0.11.0 Windows 修改版**，支持 Claude / ChatGPT 独立 IP、启停与阻断、独立诊断、ChatGPT 安装识别与默认管理员启动。基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`。安装包见本仓库 Releases；随附的本地构建未绑定自动更新源。
+本仓库为 **0.11.1 Windows 修改版**，支持 Claude / ChatGPT 独立 IP、启停与阻断、独立诊断、ChatGPT 安装识别与默认管理员启动。基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`。安装包见本仓库 Releases；随附的本地构建未绑定自动更新源。
 
 验证情况：单元、浏览器端到端和 Windows 原生规则测试覆盖独立授权、暂停、配置迁移及并行检测。真实 Claude / ChatGPT Desktop 的网络切换阻断和安装/卸载恢复仍需安装后实测。安装包未签名；本次不含 Mac 移植。
 
@@ -18,7 +18,7 @@
 - **停止提醒**：自动停止后弹窗显示原因、受影响程序与恢复步骤，IP 默认脱敏。
 - **原终端体验**：保留控制台输入输出、工作目录、环境及退出码；同一受保护进程树的内部调用复用首次许可。
 - **应用安装识别**：提供 Claude Code npm、独立原生安装版、Claude Desktop 和 ChatGPT Desktop（OpenAI MSIX 包）路径预设，也支持手动添加 EXE。
-- **程序管理**：编辑名称与启动参数，查看运行状态，确认后停止 Claude 进程树。
+- **程序管理**：编辑名称与启动参数，查看运行状态，分别查看 Claude / ChatGPT 状态并确认停止对应进程树。
 - **浏览器防护**：Chrome / Edge 扩展按所选服务保护 `claude.ai`、`chatgpt.com`、`chat.openai.com` 及其子域，显示安装和运行状态。
 - **网络诊断**：展示 IPv6、网卡、DNS、时区、地区、连通性和风险属性。
 - **桌面集成**：浅色 / 深色 / 系统主题、托盘运行、登录自启动和 GitHub Releases 更新。
@@ -76,11 +76,11 @@
 
 点击程序行的铅笔按钮，可修改名称与启动参数。保存后当前进程继续运行，参数在下次从 IP Guard 点击启动时生效；从终端启动使用终端输入的参数。
 
-顶部「停止 Claude 进程树」会结束当前登录用户、当前 Windows 会话中的 Claude CLI、Desktop 及其子进程，覆盖已添加和未添加的实例，执行前会要求确认。
+顶部同时提供「停止 Claude 进程树」与「停止 ChatGPT 进程树」，各自展示状态、独立查询和停止。前者处理 Claude CLI / Desktop，后者处理 ChatGPT Desktop；仅处理当前用户、当前 Windows 会话中对应 EXE 的进程树，包含未添加的实例，执行前要求确认。若进程树包含 IP Guard 自身或另一服务，会拒绝停止，避免连带退出。窄窗口会自动换行。
 
 在 PowerShell、CMD 或 Pebrel 中继续使用原来的 `claude` 命令。同一受保护进程树中的版本查询、内置文件搜索等内部调用复用首次许可；另开终端独立启动仍完整校验。
 
-Claude / ChatGPT Desktop 更新后可能更换 MSIX 版本目录。更新前解除旧路径防护，更新后重新选择预设并启用。顶部「停止 Claude 进程树」仍只针对 Claude；停止受保护的 ChatGPT 请使用其程序行的停止按钮。
+Claude / ChatGPT Desktop 更新后可能更换 MSIX 版本目录。更新前解除旧路径防护，更新后重新选择预设并启用。顶部两个停止按钮分别针对对应服务，也可使用程序行的停止按钮。
 
 ### 锁定与阻断规则
 

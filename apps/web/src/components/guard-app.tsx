@@ -55,9 +55,9 @@ import {
 } from "@ip-guard/electron";
 
 import { BrowserExtensionPanel } from "#src/components/browser-extension-panel.tsx";
-import { ClaudeControl } from "#src/components/claude-control.tsx";
 import { CoffeePage } from "#src/components/coffee-page.tsx";
 import { EditAppDialog } from "#src/components/edit-app-dialog.tsx";
+import { ServiceProcessControl } from "#src/components/service-process-control.tsx";
 import { UpdatePanel } from "#src/components/update-panel.tsx";
 
 import "#src/guard.css";
@@ -916,7 +916,10 @@ export function GuardApp() {
             <span>{title}</span>
           </div>
           <div className="topbar-actions">
-            <ClaudeControl />
+            <div className="process-controls">
+              <ServiceProcessControl service="claude" />
+              <ServiceProcessControl service="chatgpt" />
+            </div>
             <button
               type="button"
               className="btn ip-visibility"

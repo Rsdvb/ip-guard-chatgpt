@@ -7,13 +7,13 @@ import { commandSchema, desktopChannels, serviceName } from "@ip-guard/electron"
 import type { Reply, Service } from "@ip-guard/electron";
 
 import type { BrowserBridge } from "#src/main/browser-bridge.ts";
-import { claudeStatus, stopClaudeTrees } from "#src/main/claude-processes.ts";
 import type { CoffeeDiagnostics } from "#src/main/coffee.ts";
 import type { Guardian } from "#src/main/guardian.ts";
 import { NativeCommandError } from "#src/main/guardian.ts";
 import { applicationPresets } from "#src/main/presets.ts";
 import type { ProtectionProbe } from "#src/main/protection-probe.ts";
 import { isTrustedUrl } from "#src/main/renderer-route.ts";
+import { serviceProcessStatus, stopServiceTrees } from "#src/main/service-processes.ts";
 import type { ApplicationUpdates } from "#src/main/updates.ts";
 
 export const setupIpc = (
@@ -28,7 +28,7 @@ export const setupIpc = (
     for (const window of BrowserWindow.getAllWindows())
       window.webContents.send(desktopChannels.appUpdate, state);
   });
-  let stoppingClaude = false;
+  const stoppingServices = new Set<Service>();
   for (const diagnostics of Object.values(coffee))
     diagnostics.on("update", (report) => {
       for (const window of BrowserWindow.getAllWindows())
@@ -84,28 +84,31 @@ export const setupIpc = (
         }),
       };
     }
-    if (command.action === "claude:status") return { claude: await claudeStatus() };
-    if (command.action === "claude:stop") {
-      if (stoppingClaude) throw new Error("Claude 停止操作正在处理中");
-      stoppingClaude = true;
+    if (command.action === "process:status")
+      return { processes: await serviceProcessStatus(command.service) };
+    if (command.action === "process:stop") {
+      const service = command.service;
+      const name = serviceName(service);
+      if (stoppingServices.has(service)) throw new Error(`${name} 停止操作正在处理中`);
+      stoppingServices.add(service);
       try {
-        const current = await claudeStatus();
-        if (current.phase === "stopped") return { claude: current };
-        if (!current.canStop) throw new Error(current.message || "Claude 进程状态暂未确认");
+        const current = await serviceProcessStatus(service);
+        if (current.phase === "stopped") return { processes: current };
+        if (!current.canStop) throw new Error(current.message || `${name} 进程状态暂未确认`);
         const answer = await dialog.showMessageBox({
           type: "warning",
-          title: "停止 Claude",
-          message: "停止 Claude 进程树？",
-          detail:
-            "将结束当前登录用户的 Claude CLI、Claude Desktop 及其子进程。未保存的会话可能丢失。",
+          title: `停止 ${name}`,
+          message: `停止 ${name} 进程树？`,
+          detail: `将结束当前登录用户、当前 Windows 会话的 ${name}${service === "claude" ? " CLI、Desktop" : " Desktop"} 及其子进程，包含未添加到防护列表的实例。另一服务不会被选中。未保存的会话可能丢失。`,
           buttons: ["取消", "停止"],
           defaultId: 0,
           cancelId: 0,
         });
-        if (answer.response !== 1) return { cancelled: true, claude: await claudeStatus() };
-        return { claude: await stopClaudeTrees() };
+        if (answer.response !== 1)
+          return { cancelled: true, processes: await serviceProcessStatus(service) };
+        return { processes: await stopServiceTrees(service) };
       } finally {
-        stoppingClaude = false;
+        stoppingServices.delete(service);
       }
     }
     if (command.action === "ip:current") {

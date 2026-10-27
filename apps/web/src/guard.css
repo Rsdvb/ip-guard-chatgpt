@@ -155,32 +155,37 @@ button:active:not(:disabled) {
   margin-left: auto;
 }
 .topbar {
-  height: 69px;
+  min-height: 69px;
+  height: auto;
+  flex-wrap: wrap;
+  gap: 12px;
   border-bottom: 1px solid var(--g-line);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 36px;
+  padding: 12px 36px;
 }
 .topbar-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
   display: flex;
   align-items: center;
   gap: 14px;
 }
-.claude-control {
+.service-process-control {
   display: flex;
   align-items: center;
   gap: 9px;
 }
-.claude-stop {
+.service-process-stop {
   color: var(--g-danger);
   padding: 7px 10px;
 }
-.claude-stop:hover:not(:disabled) {
+.service-process-stop:hover:not(:disabled) {
   background: var(--g-danger-soft);
   border-color: var(--g-danger);
 }
-.claude-run-state {
+.service-process-state {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -188,7 +193,7 @@ button:active:not(:disabled) {
   white-space: nowrap;
   color: var(--g-muted);
 }
-.claude-run-state.running {
+.service-process-state.running {
   color: var(--g-accent);
 }
 @media (max-width: 580px) {
@@ -200,10 +205,10 @@ button:active:not(:disabled) {
     justify-content: space-between;
     gap: 8px;
   }
-  .claude-control {
+  .service-process-control {
     gap: 7px;
   }
-  .claude-stop {
+  .service-process-stop {
     font-size: 11px;
     padding: 7px 8px;
   }
@@ -1396,7 +1401,10 @@ input::placeholder {
   }
   .topbar {
     padding: 0 16px;
-    height: 59px;
+    min-height: 59px;
+    height: auto;
+    padding-top: 12px;
+    padding-bottom: 12px;
   }
   .breadcrumb {
     gap: 6px;
@@ -1515,5 +1523,24 @@ input::placeholder {
 @media (max-width: 600px) {
   .service-summaries {
     grid-template-columns: 1fr;
+  }
+}
+
+.process-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.service-process-stop {
+  white-space: nowrap;
+}
+@media (max-width: 580px) {
+  .process-controls {
+    width: 100%;
+    gap: 10px;
+  }
+  .topbar .breadcrumb {
+    display: none;
   }
 }

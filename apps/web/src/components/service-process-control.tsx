@@ -2,12 +2,15 @@ import { LoaderCircle, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import type { ClaudeState } from "@ip-guard/electron";
+import { serviceName } from "@ip-guard/electron";
+import type { ProcessState, Service } from "@ip-guard/electron";
 
-export function ClaudeControl() {
+export function ServiceProcessControl({ service }: { service: Service }) {
+  const name = serviceName(service);
   const bridge = window.desktop;
-  const [state, setState] = useState<ClaudeState>({
+  const [state, setState] = useState<ProcessState>({
     phase: "unknown",
+    service,
     count: 0,
     canStop: false,
     message: "",
@@ -26,12 +29,13 @@ export function ClaudeControl() {
       pending = true;
       const current = ++version.current;
       try {
-        const reply = await bridge.invoke({ action: "claude:status" });
-        if (alive && current === version.current && reply.claude) setState(reply.claude);
+        const reply = await bridge.invoke({ action: "process:status", service });
+        if (alive && current === version.current && reply.processes) setState(reply.processes);
       } catch {
         if (alive && current === version.current)
           setState({
             phase: "unknown",
+            service,
             count: 0,
             canStop: false,
             message: "进程状态读取失败",
@@ -53,17 +57,17 @@ export function ClaudeControl() {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [bridge]);
+  }, [bridge, service]);
   const stop = async () => {
     if (!bridge || stoppingRef.current) return;
     stoppingRef.current = true;
     version.current++;
     setStopping(true);
     try {
-      const reply = await bridge.invoke({ action: "claude:stop" });
-      if (reply.claude) setState(reply.claude);
-      if (!reply.cancelled && reply.claude?.phase === "stopped")
-        toast.success("Claude 进程树已停止");
+      const reply = await bridge.invoke({ action: "process:stop", service });
+      if (reply.processes) setState(reply.processes);
+      if (!reply.cancelled && reply.processes?.phase === "stopped")
+        toast.success(`${name} 进程树已停止`);
     } catch (error) {
       toast.error(
         (error instanceof Error ? error.message : "停止失败").replace(
@@ -72,11 +76,12 @@ export function ClaudeControl() {
         ),
       );
       try {
-        const reply = await bridge.invoke({ action: "claude:status" });
-        if (reply.claude) setState(reply.claude);
+        const reply = await bridge.invoke({ action: "process:status", service });
+        if (reply.processes) setState(reply.processes);
       } catch {
         setState({
           phase: "unknown",
+          service,
           count: 0,
           canStop: false,
           message: "进程状态暂未确认",
@@ -98,19 +103,19 @@ export function ClaudeControl() {
           ? "未运行"
           : "状态未知";
   return (
-    <div className="claude-control" aria-label="Claude 进程控制">
+    <div className="service-process-control" role="group" aria-label={`${name} 进程控制`}>
       <button
         type="button"
-        className="btn claude-stop"
+        className="btn service-process-stop"
         disabled={!bridge || !state.canStop || stopping || loading}
-        title={state.message || "停止当前用户的 Claude CLI 和 Desktop 进程树"}
+        title={state.message || `停止当前用户的 ${name} 进程树`}
         onClick={() => void stop()}
       >
-        {stopping ? <LoaderCircle size={14} className="spin" /> : <Square size={13} />}停止 Claude
+        {stopping ? <LoaderCircle size={14} className="spin" /> : <Square size={13} />}停止 {name}{" "}
         进程树
       </button>
       <span
-        className={`claude-run-state ${state.phase}`}
+        className={`service-process-state ${state.phase}`}
         role="status"
         title={
           state.message ||
