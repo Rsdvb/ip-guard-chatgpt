@@ -1,8 +1,8 @@
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 
-import { nativeVersion } from "@ip-guard/electron";
-import type { BrowserState, ExtensionStatus } from "@ip-guard/electron";
+import { nativeVersion, offlineBrowserPermission } from "@ip-guard/electron";
+import type { BrowserState, BrowserPermission, ExtensionStatus, Service } from "@ip-guard/electron";
 
 import { browserInstallations } from "#src/main/browser-installation.ts";
 import type { Guardian } from "#src/main/guardian.ts";
@@ -19,35 +19,37 @@ export class BrowserBridge {
   }
   private state(): BrowserState {
     const value = this.guardian.snapshot;
-    const base: BrowserState = {
-      protocol: 2,
-      service: value?.settings.service ?? "both",
-      appVersion: nativeVersion,
-      phase: "offline",
-      currentIp: value?.currentIp ?? "",
-      expectedIp: value?.settings.expectedIp ?? "",
-      checkedAt: value?.lastChecked ?? "",
-      reason: "请启动 IP Guard",
+    const permission = (key: Service): BrowserPermission => {
+      const rule = value?.services[key];
+      if (!value?.online || !rule || this.guardian.error) return offlineBrowserPermission();
+      const base = {
+        currentIp: rule.currentIp,
+        expectedIp: rule.settings.expectedIp,
+        checkedAt: rule.lastChecked,
+        reason: rule.reason,
+      };
+      if (!rule.rulesLocked)
+        return { ...base, phase: "unlocked", reason: "请锁定该服务允许的 IPv4" };
+      if (!rule.enabled) return { ...base, phase: "paused", reason: "该服务已暂停，访问保持阻断" };
+      const age = Date.now() - Date.parse(rule.lastChecked);
+      if (
+        rule.ready &&
+        rule.currentIp &&
+        rule.currentIp === rule.settings.expectedIp &&
+        Number.isFinite(age) &&
+        age >= -1000 &&
+        age <= (rule.settings.intervalSeconds + 8) * 1000
+      )
+        return { ...base, phase: "allowed", reason: "IPv4 与该服务锁定地址匹配" };
+      return { ...base, phase: rule.checking && !rule.currentIp ? "checking" : "blocked" };
     };
-    if (!value?.online || this.guardian.error) return base;
-    if (!value.rulesLocked)
-      return { ...base, phase: "unlocked", reason: "请在 IP Guard 中锁定允许的 IPv4" };
-    const age = Date.now() - Date.parse(value.lastChecked);
-    if (
-      value.ready &&
-      value.currentIp === value.settings.expectedIp &&
-      value.currentIp &&
-      Number.isFinite(age) &&
-      age >= -5000 &&
-      age <= (value.settings.intervalSeconds + 8) * 1000
-    )
-      return { ...base, phase: "allowed", reason: "IPv4 与锁定地址匹配" };
     return {
-      ...base,
-      phase: value.checking && !value.currentIp ? "checking" : "blocked",
-      reason: value.reason || "等待新的 IPv4 校验结果",
+      protocol: 3,
+      appVersion: nativeVersion,
+      services: { claude: permission("claude"), chatgpt: permission("chatgpt") },
     };
   }
+
   private listen(sid: string) {
     if (this.server) return;
     const server = createServer((socket) => {

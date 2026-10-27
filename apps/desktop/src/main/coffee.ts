@@ -7,10 +7,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 
 import { services } from "@ip-guard/electron";
-import type { SingleService, CoffeeMetric, CoffeeReport } from "@ip-guard/electron";
+import type { Service, CoffeeMetric, CoffeeReport } from "@ip-guard/electron";
 
-import type { ExitIPv4 } from "#src/main/exit-ip.ts";
-import type { ExitResult } from "#src/main/exit-policy.ts";
+import type { ExitIPv4, ExitResult } from "#src/main/exit-ip.ts";
 
 const coffeeUrl = "https://ip.net.coffee/claude/";
 const base = "https://ip.net.coffee";
@@ -73,7 +72,7 @@ const message = (error: unknown) =>
 
 export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> {
   private readonly probe: ExitIPv4;
-  private readonly service: SingleService;
+  private readonly service: Service;
   private get name() {
     return services[this.service].name;
   }
@@ -90,7 +89,7 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
   }
   private refreshAfterRun = false;
   private collectingIp = "";
-  constructor(service: SingleService, probe: ExitIPv4) {
+  constructor(service: Service, probe: ExitIPv4) {
     super();
     this.probe = probe;
     this.service = service;

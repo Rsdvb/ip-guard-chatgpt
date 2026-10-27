@@ -1,7 +1,7 @@
 import { CircleX, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { SingleService, CoffeeMetric, CoffeeReport } from "@ip-guard/electron";
+import type { Service, CoffeeMetric, CoffeeReport } from "@ip-guard/electron";
 import { services, formatIPText, ipv4Schema, ipv6Schema } from "@ip-guard/electron";
 
 const initial: CoffeeReport = {
@@ -160,9 +160,9 @@ function udpProbe(signal: AbortSignal): Promise<UdpResult> {
   });
 }
 type HistoryEntry = { ip: string; time: string };
-const historyKey = (service: SingleService) =>
+const historyKey = (service: Service) =>
   service === "claude" ? "ipguard.coffee.history" : "ipguard.coffee.history.chatgpt";
-function loadHistory(service: SingleService): HistoryEntry[] {
+function loadHistory(service: Service): HistoryEntry[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(historyKey(service)) ?? "[]");
     if (!Array.isArray(value)) return [];
@@ -201,13 +201,7 @@ function MetricRows({ items, ipsVisible }: { items: CoffeeMetric[]; ipsVisible: 
   );
 }
 
-export function CoffeePage({
-  service,
-  ipsVisible,
-}: {
-  service: SingleService;
-  ipsVisible: boolean;
-}) {
+export function CoffeePage({ service, ipsVisible }: { service: Service; ipsVisible: boolean }) {
   const bridge = window.desktop;
   const name = services[service].name;
   const [report, setReport] = useState<CoffeeReport>({ ...initial, service });

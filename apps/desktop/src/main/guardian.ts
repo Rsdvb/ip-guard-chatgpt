@@ -189,14 +189,21 @@ export class Guardian extends EventEmitter {
     const progress = (data: ProbeProgress) => {
       if (this.child === child) this.send({ action: "probe-progress", id, data });
     };
-    this.probeService.on("progress", progress);
     try {
-      const pending = this.probeService.check(service);
-      for (const step of this.probeService.steps) progress(step);
-      const result = await pending;
+      const result = await this.probeService.check(service, progress);
       if (this.child === child) this.send({ action: "probe-result", id, data: result });
-    } finally {
-      this.probeService.off("progress", progress);
+    } catch (error) {
+      if (this.child === child)
+        this.send({
+          action: "probe-result",
+          id,
+          data: {
+            ip: "",
+            error: error instanceof Error ? error.message : "服务出口检测失败",
+            checkedAt: new Date().toISOString(),
+            adapter: "",
+          },
+        });
     }
   }
   private fail(message: string) {
@@ -216,10 +223,21 @@ export class Guardian extends EventEmitter {
       this.snapshot = {
         ...this.snapshot,
         online: false,
-        ready: false,
-        checking: false,
+        services: {
+          claude: {
+            ...this.snapshot.services.claude,
+            ready: false,
+            checking: false,
+            reason: message,
+          },
+          chatgpt: {
+            ...this.snapshot.services.chatgpt,
+            ready: false,
+            checking: false,
+            reason: message,
+          },
+        },
         running: [],
-        reason: message,
       };
       this.emit("snapshot", this.snapshot);
     }
@@ -232,7 +250,8 @@ export class Guardian extends EventEmitter {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.fail("守护操作超时，请重启 IP Guard 后检查日志。");
+        this.pending.delete(id);
+        reject(new Error("操作等待超时，请查看当前状态；后台防护仍在运行。"));
       }, 25000);
       this.pending.set(id, { resolve, reject, timer });
       input.write(`${JSON.stringify({ ...payload, action, id })}\n`, (error) => {

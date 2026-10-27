@@ -2,7 +2,6 @@ import {
   browserStateSchema,
   formatIPText,
   protectedService,
-  selectedServices,
   services,
   shouldBlockUrl,
 } from "@ip-guard/electron";
@@ -48,8 +47,6 @@ try {
   /* Invalid destinations fall back to the selected service's home page. */
 }
 const requestedService = new URLSearchParams(location.search).get("service");
-let chosen =
-  Boolean(originalTarget) || requestedService === "claude" || requestedService === "chatgpt";
 selector.value = originalTarget
   ? (protectedService(originalTarget.href) ?? "claude")
   : requestedService === "chatgpt"
@@ -61,7 +58,6 @@ const destination = () =>
     ? originalTarget.href
     : `https://${services[selected()].domains[0]}/`;
 selector.addEventListener("change", () => {
-  chosen = true;
   void render();
 });
 document.documentElement.dataset.theme =
@@ -101,44 +97,36 @@ async function render() {
   const state = parsed.success ? parsed.data : undefined;
   const age = typeof saved.receivedAt === "number" ? Date.now() - saved.receivedAt : Infinity;
   const fresh = age >= 0 && age < 3500;
-  if (!chosen && state) selector.value = state.service === "chatgpt" ? "chatgpt" : "claude";
-  const protectedHere = !state || selectedServices(state.service).includes(selected());
-  const phase = fresh && state ? state.phase : "offline";
+  const rule = state?.services[selected()];
+  const phase = fresh && rule ? rule.phase : "offline";
   permitted = Boolean(state && !shouldBlockUrl(destination(), state, fresh));
   open.textContent = `${blocked ? "返回" : "打开"} ${services[selected()].name}`;
   document.body.dataset.phase = phase;
-  element("status").textContent = !protectedHere
-    ? "未启用防护"
-    : permitted
-      ? "校验通过"
+  element("status").textContent = permitted
+    ? "校验通过"
+    : phase === "paused"
+      ? "该服务已暂停"
       : phase === "checking"
         ? "正在检测"
         : "访问已阻断";
   element("reason").textContent = formatIPText(
-    !protectedHere
-      ? "此服务未选入防护；可在 IP Guard 的防护设置中启用"
-      : fresh && state
-        ? state.reason
-        : "请运行 IP Guard 并准备浏览器扩展",
+    fresh && rule ? rule.reason : "请运行 IP Guard 并准备浏览器扩展",
     ipsVisible,
   );
-  element("current").textContent = formatIPText(
-    protectedHere ? state?.currentIp || "—" : "未检测",
-    ipsVisible,
-  );
-  element("expected").textContent = formatIPText(state?.expectedIp || "—", ipsVisible);
+  element("current").textContent = formatIPText(rule?.currentIp || "—", ipsVisible);
+  element("expected").textContent = formatIPText(rule?.expectedIp || "—", ipsVisible);
   element("version").textContent = state?.appVersion ? `v${state.appVersion}` : "";
-  const date = state?.checkedAt ? new Date(state.checkedAt) : undefined;
+  const date = rule?.checkedAt ? new Date(rule.checkedAt) : undefined;
   element("time").textContent =
     date && Number.isFinite(date.getTime())
       ? `最近检测 ${date.toLocaleTimeString("zh-CN", { hour12: false })}`
       : "等待守护结果";
   open.disabled = !permitted;
   const values = [
-    protectedHere && phase !== "offline",
-    protectedHere && phase !== "offline" && phase !== "unlocked",
-    protectedHere && Boolean(state?.currentIp) && fresh,
-    protectedHere && permitted,
+    phase !== "offline",
+    phase !== "offline" && phase !== "unlocked",
+    Boolean(rule?.currentIp) && fresh,
+    permitted,
   ];
   element("steps")
     .querySelectorAll("li")

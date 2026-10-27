@@ -4,7 +4,7 @@ import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import { commandSchema, desktopChannels, serviceName } from "@ip-guard/electron";
-import type { Reply, SingleService } from "@ip-guard/electron";
+import type { Reply, Service } from "@ip-guard/electron";
 
 import type { BrowserBridge } from "#src/main/browser-bridge.ts";
 import { claudeStatus, stopClaudeTrees } from "#src/main/claude-processes.ts";
@@ -19,7 +19,7 @@ import type { ApplicationUpdates } from "#src/main/updates.ts";
 export const setupIpc = (
   devOrigin: string | null,
   guardian: Guardian,
-  coffee: Record<SingleService, CoffeeDiagnostics>,
+  coffee: Record<Service, CoffeeDiagnostics>,
   probe: ProtectionProbe,
   updates: ApplicationUpdates,
   browser: BrowserBridge,
@@ -45,26 +45,6 @@ export const setupIpc = (
     )
       throw new Error("Untrusted IPC sender");
     const command = commandSchema.parse(input);
-    if (command.action === "service:set") {
-      const snapshot = await guardian.request("status");
-      if (snapshot.settings.service === command.service) return { snapshot };
-      if (!snapshot.admin) throw new Error("请以管理员身份运行 IP Guard");
-      if (snapshot.rulesLocked || snapshot.running.length) {
-        const answer = await dialog.showMessageBox({
-          type: "warning",
-          title: "切换防护服务",
-          message: `切换为 ${serviceName(command.service)} 并重新设置地址？`,
-          detail:
-            "将停止受保护程序、封锁连接并清除旧锁定地址。请先保存会话。切换后需重新获取并锁定新服务的出口 IPv4。",
-          buttons: ["取消", "切换并重新设置"],
-          defaultId: 0,
-          cancelId: 0,
-        });
-        if (answer.response !== 1)
-          return { cancelled: true, snapshot: await guardian.request("status") };
-      }
-      return { snapshot: await guardian.request("service:set", { service: command.service }) };
-    }
     if (command.action === "extension:status") return { extension: await browser.status() };
     if (command.action === "extension:setup") {
       await guardian.request("browser:register");
@@ -80,22 +60,29 @@ export const setupIpc = (
     if (command.action === "update:download") return { appUpdate: await updates.download() };
     if (command.action === "update:install") return { appUpdate: await updates.install() };
     if (command.action === "update:releases") return { appUpdate: await updates.releases() };
-    if (command.action === "unlock") {
+    if (command.action === "unlock" || (command.action === "service:enable" && !command.enabled)) {
       const snapshot = await guardian.request("status");
-      if (!snapshot.rulesLocked) return { snapshot };
+      if (command.action === "unlock" && !snapshot.services[command.service].rulesLocked)
+        return { snapshot };
       if (!snapshot.admin) throw new Error("请以管理员身份重启 IP Guard");
+      const pause = command.action === "service:enable";
       const answer = await dialog.showMessageBox({
         type: "warning",
-        title: "取消 IP 锁定",
-        message: "取消锁定并停止受保护程序？",
-        detail: "将结束受保护进程树并封锁连接。未保存的内容可能丢失，重新锁定 IP 后才能再次启动。",
-        buttons: ["保持锁定", "取消锁定并停止"],
+        title: pause ? "暂停服务" : "取消 IP 锁定",
+        message: `${pause ? "暂停" : "取消锁定并停止"} ${serviceName(command.service)}？`,
+        detail: `只结束该服务的受保护进程树并封锁其连接。${pause ? "保留该服务的锁定地址，可重新启动防护。" : "取消该服务锁定后需重新锁定才能启动。"}另一服务不受影响。请先保存会话。`,
+        buttons: ["取消", pause ? "暂停并阻断" : "取消锁定并停止"],
         defaultId: 0,
         cancelId: 0,
       });
       if (answer.response !== 1)
         return { cancelled: true, snapshot: await guardian.request("status") };
-      return { snapshot: await guardian.request("unlock") };
+      return {
+        snapshot: await guardian.request(command.action, {
+          service: command.service,
+          ...(command.action === "service:enable" ? { enabled: false } : {}),
+        }),
+      };
     }
     if (command.action === "claude:status") return { claude: await claudeStatus() };
     if (command.action === "claude:stop") {

@@ -1486,3 +1486,34 @@ input::placeholder {
     scroll-behavior: auto !important;
   }
 }
+
+.service-summaries {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.service-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.service-summary.selected {
+  border-color: #138575;
+  box-shadow: 0 0 0 1px #138575;
+}
+.service-summary span,
+.service-summary small {
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .service-summaries {
+    grid-template-columns: 1fr;
+  }
+}

@@ -84,7 +84,7 @@ namespace IpGuard {
                 if(sid!=SystemPolicy.Sid || !Guid.TryParseExact(id,"D",out parsed)) throw new Exception("启动标识无效。");
                 Config config=Data.Load(); Target target=config.apps.SingleOrDefault(t=>t.id==id);
                 if(target==null || !target.enabled) throw new Exception("该程序尚未启用防护。");
-                expected=config.settings.expectedIp; if(window!=null) window.Context(target.name,expected);
+                expected=config.services[target.service].settings.expectedIp; if(window!=null) window.Context(target.name,expected);
                 string exe=target.path;
                 if(packaged) { info=PackagePolicy.OpenTarget(target,Argument(args,"-p"),Argument(args,"-tid")); processOwned=true; }
                 using(NamedPipeClientStream pipe=new NamedPipeClientStream(".","IPGuard-"+sid,PipeDirection.InOut,PipeOptions.Asynchronous)) {

@@ -8,6 +8,7 @@ using Microsoft.Win32;
 
 namespace IpGuard {
     public static class BrowserHost {
+        static object Offline() { return new { phase="offline",currentIp="",expectedIp="",checkedAt="",reason="请运行新版 IP Guard，并更新浏览器扩展" }; }
         const string Host="com.ipguard.browser";
         static string Manifest { get { return Path.Combine(Data.DirectoryPath,"browser",Host+".json"); } }
         static string[] Browsers { get { return new[] { @"Software\Google\Chrome\NativeMessagingHosts\", @"Software\Microsoft\Edge\NativeMessagingHosts\" }; } }
@@ -43,7 +44,7 @@ namespace IpGuard {
                     uint size=BitConverter.ToUInt32(Read(input,4),0);
                     if(size==0 || size>16384) return 1;
                     var request=Data.Json().Deserialize<Dictionary<string,object>>(Encoding.UTF8.GetString(Read(input,(int)size)));
-                    if(request==null || !request.ContainsKey("action") || request["action"] as string!="watch" || !request.ContainsKey("protocol") || Convert.ToInt32(request["protocol"])!=2) return 1;
+                    if(request==null || !request.ContainsKey("action") || request["action"] as string!="watch" || !request.ContainsKey("protocol") || Convert.ToInt32(request["protocol"])!=3) return 1;
                     using(NamedPipeClientStream pipe=new NamedPipeClientStream(".","IPGuard-Browser-"+SystemPolicy.Sid,PipeDirection.In,PipeOptions.Asynchronous)) {
                         pipe.Connect(2000);
                         Task.Run(()=>{try { while(input.ReadByte()!=-1) { } } catch(IOException) { } finally { pipe.Dispose(); }});
@@ -56,7 +57,7 @@ namespace IpGuard {
                         }
                     }
                 } catch(Exception) {
-                    try { Send(output,Data.Json().Serialize(new { protocol=2,service="both",appVersion=BuildInfo.Version,phase="offline",currentIp="",expectedIp="",checkedAt="",reason="请运行新版 IP Guard，并在设置中准备浏览器扩展" })); } catch(IOException) { }
+                    try { Send(output,Data.Json().Serialize(new { protocol=3,appVersion=BuildInfo.Version,services=new { claude=Offline(),chatgpt=Offline() } })); } catch(IOException) { }
                     return 1;
                 }
             }

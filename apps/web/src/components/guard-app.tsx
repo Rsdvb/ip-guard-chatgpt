@@ -43,6 +43,7 @@ import type {
   Settings,
   Snapshot,
   Service,
+  ServiceSnapshot,
 } from "@ip-guard/electron";
 import {
   formatIPText,
@@ -61,17 +62,22 @@ import { UpdatePanel } from "#src/components/update-panel.tsx";
 
 import "#src/guard.css";
 
-const initial: Snapshot = {
-  online: false,
-  admin: false,
+const initialRule = (): ServiceSnapshot => ({
   ready: false,
   checking: false,
-  nativeVersion,
-  ipSource: serviceSource("both"),
   currentIp: "",
   adapter: "",
   lastChecked: "",
   reason: "",
+  rulesLocked: false,
+  enabled: false,
+  settings: { expectedIp: "", intervalSeconds: 2 },
+});
+const initial: Snapshot = {
+  online: false,
+  admin: false,
+  nativeVersion,
+  services: { claude: initialRule(), chatgpt: initialRule() },
   detection: "",
   running: [],
   autostart: false,
@@ -85,8 +91,6 @@ const initial: Snapshot = {
     error: "",
   },
   networkAdapterId: "",
-  rulesLocked: false,
-  settings: { expectedIp: "", intervalSeconds: 2, service: "both" },
   apps: [],
   logs: [],
 };
@@ -165,6 +169,9 @@ function ThemeControl() {
   );
 }
 function RuleForm({
+  service,
+  enabled,
+  onEnabled,
   ipsVisible,
   settings,
   locked,
@@ -176,6 +183,9 @@ function RuleForm({
   onFetch,
 }: {
   ipsVisible: boolean;
+  service: Service;
+  enabled: boolean;
+  onEnabled: () => void;
   settings: Settings;
   locked: boolean;
   busy: boolean;
@@ -190,7 +200,7 @@ function RuleForm({
   const [fetching, setFetching] = useState(false);
   useEffect(
     () => setDraft(settings),
-    [locked, settings.expectedIp, settings.intervalSeconds, settings.service],
+    [locked, settings.expectedIp, settings.intervalSeconds, service],
   );
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -208,7 +218,7 @@ function RuleForm({
     setError("");
     setFetching(true);
     try {
-      const ip = await onFetch(draft.service);
+      const ip = await onFetch(service);
       setDraft((current) => ({ ...current, expectedIp: ip }));
     } catch (error) {
       setError(errorText(error, "获取失败"));
@@ -222,8 +232,8 @@ function RuleForm({
         <label htmlFor="protection-service">防护服务</label>
         <select
           id="protection-service"
-          value={draft.service}
-          disabled={busy || fetching || !available}
+          value={service}
+          disabled={busy || fetching}
           onChange={(event) => {
             const service = serviceSchema.parse(event.target.value);
             void onServiceChange(service);
@@ -231,12 +241,9 @@ function RuleForm({
         >
           <option value="claude">Claude</option>
           <option value="chatgpt">ChatGPT</option>
-          <option value="both">Claude + ChatGPT（两边出口须相同）</option>
         </select>
         <span className="muted">
-          {locked
-            ? "切换服务需确认停止程序并清除旧地址，然后重新获取和锁定。"
-            : "程序列表共用此规则；选择服务后获取并锁定对应地址。"}
+          两套规则独立保存；切换查看不会停止程序或清除地址。暂停后该服务保持阻断。
         </span>
       </div>
       <div className="form-row">
@@ -269,8 +276,8 @@ function RuleForm({
         </div>
       </div>
       <div className="form-row">
-        <label htmlFor="ip-source">IPv4 来源 · {serviceName(draft.service)} 出口</label>
-        <input id="ip-source" spellCheck={false} readOnly value={serviceSource(draft.service)} />
+        <label htmlFor="ip-source">IPv4 来源 · {serviceName(service)} 出口</label>
+        <input id="ip-source" spellCheck={false} readOnly value={serviceSource(service)} />
       </div>
       <div className="form-row">
         <label htmlFor="interval">检测间隔</label>
@@ -294,6 +301,11 @@ function RuleForm({
         </div>
       )}
       <div className="form-footer">
+        {locked && (
+          <button type="button" className="btn" disabled={busy || !available} onClick={onEnabled}>
+            {enabled ? "暂停该服务" : "启动该服务"}
+          </button>
+        )}
         <span className={`rule-lock-state ${locked ? "locked" : ""}`} role="status">
           {locked ? <Lock size={14} /> : <Unlock size={14} />}
           {locked ? "IP 已锁定" : "IP 未锁定"}
@@ -335,6 +347,7 @@ function AddDialog({
   const [path, setPath] = useState("");
   const [name, setName] = useState("");
   const [args, setArgs] = useState("");
+  const [service, setService] = useState<Service>("claude");
   const [presets, setPresets] = useState<AppPreset[]>([]);
   const [finding, setFinding] = useState(true);
   const [presetRevision, setPresetRevision] = useState(0);
@@ -375,6 +388,7 @@ function AddDialog({
     const selected = await onPick();
     if (selected) {
       setPath(selected);
+      setService(/(?:^|[\\/])chatgpt\.exe$/i.test(selected) ? "chatgpt" : "claude");
       setSelected("");
       setName(
         selected
@@ -397,7 +411,14 @@ function AddDialog({
         onSubmit={(event) => {
           event.preventDefault();
           if (!canAdd || busy || duplicate) return;
-          void onAdd({ id: crypto.randomUUID(), name, path, arguments: args, enabled: false });
+          void onAdd({
+            id: crypto.randomUUID(),
+            name,
+            path,
+            arguments: args,
+            service,
+            enabled: false,
+          });
         }}
       >
         <header>
@@ -433,6 +454,7 @@ function AddDialog({
                   title={preset.path || preset.message}
                   onClick={() => {
                     setPath(preset.path);
+                    setService(preset.id === "chatgpt-desktop" ? "chatgpt" : "claude");
                     setName(preset.name);
                     setArgs("");
                     setSelected(preset.id);
@@ -482,6 +504,17 @@ function AddDialog({
                 浏览
               </button>
             </div>
+          </div>
+          <div className="form-row">
+            <label htmlFor="app-service">归属服务</label>
+            <select
+              id="app-service"
+              value={service}
+              onChange={(event) => setService(serviceSchema.parse(event.target.value))}
+            >
+              <option value="claude">Claude</option>
+              <option value="chatgpt">ChatGPT</option>
+            </select>
           </div>
           <div className="form-row">
             <label htmlFor="app-name">显示名称</label>
@@ -535,6 +568,11 @@ export function GuardApp() {
   }, []);
   const [snapshot, setSnapshot] = useState<Snapshot>(initial);
   const [page, setPage] = useState<Page>("overview");
+  const [selectedService, setSelectedService] = useState<Service>("claude");
+  useEffect(() => {
+    if (page === "coffee") setSelectedService("claude");
+    if (page === "chatgpt") setSelectedService("chatgpt");
+  }, [page]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(Boolean(window.desktop));
   const [failure, setFailure] = useState("");
@@ -581,6 +619,7 @@ export function GuardApp() {
     const unsubscribe = bridge.subscribe((value) => {
       if (alive) {
         setSnapshot(value);
+        setFailure("");
         setLoading(false);
       }
     });
@@ -620,7 +659,8 @@ export function GuardApp() {
       setBusy(false);
     }
   };
-  const locked = snapshot.rulesLocked;
+  const rule = snapshot.services[selectedService];
+  const locked = rule.rulesLocked;
   const offline = Boolean(bridge && !loading && (!snapshot.online || failure));
   const available = Boolean(bridge && snapshot.online && snapshot.admin && !failure);
   const enabledCount = snapshot.apps.filter((a) => a.enabled).length;
@@ -630,26 +670,33 @@ export function GuardApp() {
       ? "守护离线"
       : !bridge
         ? "桌面版专用"
-        : !locked
-          ? "待锁定"
-          : snapshot.ready
-            ? "IPv4 匹配"
-            : "已阻断";
+        : !rule.enabled && locked
+          ? "已暂停"
+          : !locked
+            ? "待锁定"
+            : rule.ready
+              ? "IPv4 匹配"
+              : "已阻断";
   const lock = async (settings: Settings) => {
-    const result = await invoke({ action: "lock", settings });
+    const result = await invoke({ action: "lock", service: selectedService, settings });
     if (result?.snapshot) {
-      if (result.snapshot.ready) toast.success("公网 IPv4 已锁定，校验通过");
-      else toast.warning(formatIPText(`IP 已锁定 · ${result.snapshot.reason || "等待校验"}`));
+      if (result.snapshot.services[selectedService].ready)
+        toast.success("公网 IPv4 已锁定，校验通过");
+      else
+        toast.warning(
+          formatIPText(
+            `IP 已锁定 · ${result.snapshot.services[selectedService].reason || "等待校验"}`,
+          ),
+        );
     }
   };
   const unlock = async () => {
-    const result = await invoke({ action: "unlock" });
-    if (result?.snapshot && !result.cancelled) toast.success("已取消锁定，受保护程序已停止");
+    const result = await invoke({ action: "unlock", service: selectedService });
+    if (result?.snapshot && !result.cancelled)
+      toast.success(`已取消 ${serviceName(selectedService)} 锁定，仅该服务程序已停止`);
   };
   const changeService = async (service: Service) => {
-    const result = await invoke({ action: "service:set", service });
-    if (!result?.snapshot || result.cancelled) return false;
-    toast.success(`已切换为 ${serviceName(service)}，请重新获取并锁定地址`);
+    setSelectedService(service);
     return true;
   };
   const fetchIPv4 = bridge
@@ -698,6 +745,8 @@ export function GuardApp() {
         <div className="app-list">
           {snapshot.apps.map((target) => {
             const running = snapshot.running.includes(target.id);
+            const targetRule = snapshot.services[target.service];
+            const targetLocked = targetRule.rulesLocked && targetRule.enabled;
             const actionReason = !bridge
               ? "请在 Windows 桌面版操作"
               : loading
@@ -706,11 +755,13 @@ export function GuardApp() {
                   ? "请重启守护程序"
                   : !snapshot.admin
                     ? "请以管理员身份重启"
-                    : !running && !locked
-                      ? "先锁定允许的公网 IPv4"
-                      : !running && !target.enabled
-                        ? "先开启右侧防护开关"
-                        : "";
+                    : !running && !targetRule.rulesLocked
+                      ? "先锁定该服务允许的公网 IPv4"
+                      : !running && !targetRule.enabled
+                        ? "先启动该服务防护"
+                        : !running && !target.enabled
+                          ? "先开启右侧防护开关"
+                          : "";
             return (
               <article className="app-row" key={target.id}>
                 <div className={`app-glyph ${running ? "running" : ""}`}>
@@ -718,14 +769,18 @@ export function GuardApp() {
                 </div>
                 <div className="app-info">
                   <h3>
-                    {target.name}
+                    {target.name} <small>{serviceName(target.service)}</small>
                     <span className={`small-status ${running ? "good" : ""}`}>
                       {running
                         ? "运行中"
                         : target.enabled
-                          ? locked
-                            ? "待启动"
-                            : "待锁定"
+                          ? !targetRule.rulesLocked
+                            ? "待锁定"
+                            : !targetRule.enabled
+                              ? "已暂停"
+                              : targetRule.ready
+                                ? "待启动"
+                                : "已阻断"
                           : "未启用"}
                     </span>
                   </h3>
@@ -742,7 +797,7 @@ export function GuardApp() {
                   <Toggle
                     checked={target.enabled}
                     label={`${target.enabled ? "解除" : "启用"} ${target.name} 防护`}
-                    disabled={busy || !available || (!target.enabled && !locked)}
+                    disabled={busy || !available || (!target.enabled && !targetLocked)}
                     onChange={() =>
                       void invoke({ action: "protect", id: target.id, enabled: !target.enabled })
                     }
@@ -882,11 +937,11 @@ export function GuardApp() {
               <h1>{title}</h1>
             </div>
             <div
-              className={`status-pill ${snapshot.ready ? "good" : locked ? "danger" : ""}`}
+              className={`status-pill ${rule.ready ? "good" : locked ? "danger" : ""}`}
               role="status"
             >
               <span className="tiny-dot" />
-              {status}
+              {serviceName(selectedService)} · {status}
             </div>
           </div>
           {(!bridge || offline || (bridge && !snapshot.admin && !loading)) && (
@@ -895,7 +950,7 @@ export function GuardApp() {
               <span>
                 {formatIPText(
                   failure ||
-                    (offline ? snapshot.reason || "守护程序离线，请重启 IP Guard。" : "") ||
+                    (offline ? rule.reason || "守护程序离线，请重启 IP Guard。" : "") ||
                     (!bridge
                       ? "请打开 Windows 桌面版以配置启动拦截与后台防护。"
                       : "管理启动拦截与防火墙需要管理员权限。"),
@@ -926,6 +981,36 @@ export function GuardApp() {
               )}
             </div>
           )}
+          {(page === "overview" || page === "settings") && (
+            <div className="service-summaries">
+              {(["claude", "chatgpt"] as const).map((key) => {
+                const item = snapshot.services[key];
+                return (
+                  <button
+                    type="button"
+                    key={key}
+                    className={`panel service-summary ${selectedService === key ? "selected" : ""}`}
+                    aria-pressed={selectedService === key}
+                    onClick={() => setSelectedService(key)}
+                  >
+                    <strong>{serviceName(key)}</strong>
+                    <span>
+                      {!item.rulesLocked
+                        ? "待锁定"
+                        : !item.enabled
+                          ? "已暂停 · 已阻断"
+                          : item.ready
+                            ? "防护中 · IP 匹配"
+                            : "已阻断"}
+                    </span>
+                    <small className="mono">
+                      {formatIPText(item.settings.expectedIp || "尚未设置", ipsVisible)}
+                    </small>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div key={page} className="page-content">
             {(page === "coffee" || page === "chatgpt") && (
               <CoffeePage
@@ -936,39 +1021,39 @@ export function GuardApp() {
             )}
             {page === "overview" && (
               <>
-                <section className={`network-panel ${snapshot.ready ? "matched" : ""}`}>
+                <section className={`network-panel ${rule.ready ? "matched" : ""}`}>
                   <div className="network-main">
                     <div className="network-label">
                       <span className="network-icon">
                         <Network size={20} />
                       </span>
-                      {serviceName(snapshot.settings.service)} 出口 IPv4
+                      {serviceName(selectedService)} 出口 IPv4
                       <button
                         type="button"
                         className="icon-btn"
                         title="立即检测"
                         aria-label="立即检测"
                         disabled={busy || !bridge || !locked}
-                        onClick={() => void invoke({ action: "check" })}
+                        onClick={() => void invoke({ action: "check", service: selectedService })}
                       >
-                        <RefreshCw size={15} className={busy || snapshot.checking ? "spin" : ""} />
+                        <RefreshCw size={15} className={busy || rule.checking ? "spin" : ""} />
                       </button>
                     </div>
                     <div className="public-ip mono">
-                      {formatIPText(snapshot.currentIp || "— . — . — . —", ipsVisible)}
+                      {formatIPText(rule.currentIp || "— . — . — . —", ipsVisible)}
                     </div>
                     <div className="allowed-ip">
                       <span>允许地址</span>
                       <span className="mono">
-                        {formatIPText(snapshot.settings.expectedIp || "尚未设置", ipsVisible)}
+                        {formatIPText(rule.settings.expectedIp || "尚未设置", ipsVisible)}
                       </span>
-                      {snapshot.ready && <Check size={14} />}
+                      {rule.ready && <Check size={14} />}
                     </div>
                   </div>
                   <div className="network-aside">
                     <div className="network-detail">
                       <Wifi size={15} />
-                      <span>{formatIPText(snapshot.adapter || "等待网络检测", ipsVisible)}</span>
+                      <span>{formatIPText(rule.adapter || "等待网络检测", ipsVisible)}</span>
                     </div>
                     <div
                       className={`network-detail adapter-monitor ${snapshot.watchedAdapter.exists && snapshot.watchedAdapter.up ? "online" : "warning"}`}
@@ -985,13 +1070,13 @@ export function GuardApp() {
                     <div className="network-detail">
                       <RefreshCw size={14} />
                       <span>
-                        {snapshot.checking
-                          ? `正在获取 ${serviceName(snapshot.settings.service)} IPv4`
-                          : `每 ${snapshot.settings.intervalSeconds} 秒检测`}
+                        {rule.checking
+                          ? `正在获取 ${serviceName(selectedService)} IPv4`
+                          : `每 ${rule.settings.intervalSeconds} 秒检测`}
                       </span>
                     </div>
                     <div className="last-check">
-                      最近检测 <span className="mono">{time(snapshot.lastChecked)}</span>
+                      最近检测 <span className="mono">{time(rule.lastChecked)}</span>
                     </div>
                   </div>
                   <div className={`network-ipv6 ${ipv6?.status ?? "unknown"}`}>
@@ -1005,14 +1090,14 @@ export function GuardApp() {
                     </button>
                   </div>
                   <div className="network-footer">
-                    <span className={`tiny-dot ${snapshot.ready ? "good" : ""}`} />
+                    <span className={`tiny-dot ${rule.ready ? "good" : ""}`} />
                     <span>
                       {loading
                         ? "正在连接本机守护程序…"
                         : !locked
                           ? "锁定允许地址后开始校验"
                           : formatIPText(
-                              snapshot.reason || "地址匹配 · 启动时仍会重新校验",
+                              rule.reason || "地址匹配 · 启动时仍会重新校验",
                               ipsVisible,
                             )}
                     </span>
@@ -1034,7 +1119,17 @@ export function GuardApp() {
                     </div>
                     <RuleForm
                       ipsVisible={ipsVisible}
-                      settings={snapshot.settings}
+                      key={selectedService}
+                      service={selectedService}
+                      enabled={rule.enabled}
+                      onEnabled={() =>
+                        void invoke({
+                          action: "service:enable",
+                          service: selectedService,
+                          enabled: !rule.enabled,
+                        })
+                      }
+                      settings={rule.settings}
                       locked={locked}
                       busy={busy}
                       available={available}
@@ -1086,7 +1181,17 @@ export function GuardApp() {
                   </div>
                   <RuleForm
                     ipsVisible={ipsVisible}
-                    settings={snapshot.settings}
+                    key={selectedService}
+                    service={selectedService}
+                    enabled={rule.enabled}
+                    onEnabled={() =>
+                      void invoke({
+                        action: "service:enable",
+                        service: selectedService,
+                        enabled: !rule.enabled,
+                      })
+                    }
+                    settings={rule.settings}
                     locked={locked}
                     busy={busy}
                     available={available}

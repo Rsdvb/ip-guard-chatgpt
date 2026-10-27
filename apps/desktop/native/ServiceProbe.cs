@@ -3,28 +3,28 @@ using System.Collections.Generic;
 using System.Threading;
 
 namespace IpGuard {
-    public sealed class ClaudeProbeResult {
+    public sealed class ServiceProbeResult {
         public string ip,error,checkedAt,adapter;
     }
-    public sealed class ClaudeProbe {
+    public sealed class ServiceProbe {
         sealed class Pending {
             public readonly ManualResetEventSlim signal=new ManualResetEventSlim(false);
             public Action<ProbeProgress> progress;
-            public ClaudeProbeResult result;
+            public ServiceProbeResult result;
         }
         readonly object sync=new object();
         readonly Dictionary<string,Pending> pending=new Dictionary<string,Pending>();
         readonly Action<object> emit;
         bool stopped;
-        public ClaudeProbe(Action<object> emit) { this.emit=emit; }
-        public ClaudeProbeResult Read(string service,Action<ProbeProgress> progress) {
+        public ServiceProbe(Action<object> emit) { this.emit=emit; }
+        public ServiceProbeResult Read(string service,Action<ProbeProgress> progress) {
             Data.ValidateService(service);
             string id=Guid.NewGuid().ToString("D"); Pending request=new Pending { progress=progress };
             lock(sync) { if(stopped) throw new Exception("出口检测服务正在退出。"); pending.Add(id,request); }
             try {
                 emit(new { type="probe",id=id,service=service });
                 if(!request.signal.Wait(8000)) throw new Exception("所选服务的出口 IPv4 检测服务未响应。");
-                ClaudeProbeResult result=request.result;
+                ServiceProbeResult result=request.result;
                 if(result==null) throw new Exception("出口 IPv4 检测已取消。");
                 if(!String.IsNullOrEmpty(result.error)) throw new Exception(result.error);
                 if(!Data.PublicV4(result.ip)) throw new Exception("所选服务未返回有效公网 IPv4。");
@@ -45,7 +45,7 @@ namespace IpGuard {
                     ProbeProgress value=Data.Json().Deserialize<ProbeProgress>(Data.Json().Serialize(input["data"]));
                     if(value!=null && request.progress!=null) request.progress(value);
                 } else {
-                    request.result=Data.Json().Deserialize<ClaudeProbeResult>(Data.Json().Serialize(input["data"]));
+                    request.result=Data.Json().Deserialize<ServiceProbeResult>(Data.Json().Serialize(input["data"]));
                     request.signal.Set();
                 }
             }

@@ -23,23 +23,19 @@ namespace IpGuard {
     }
     public sealed class Guard {
         readonly object state = new object(), actions = new object(), output = new object();
-        readonly List<Session> sessions = new List<Session>();
+        readonly Dictionary<string,ServiceRuntime> runtimes = new Dictionary<string,ServiceRuntime> { { "claude",new ServiceRuntime() }, { "chatgpt",new ServiceRuntime() } };
         readonly List<object> logs = new List<object>();
         readonly Config config;
         readonly WifiWatch wifi;
-        readonly ClaudeProbe probe;
+        readonly ServiceProbe probe;
         readonly BlockingCollection<Dictionary<string,object>> commands=new BlockingCollection<Dictionary<string,object>>();
         AdapterInfo[] adapters=new AdapterInfo[0];
         AdapterInfo watchedAdapter=new AdapterInfo { id="",name="正在检测网卡",exists=false };
-        bool healthy, pendingBlock, checking;
         volatile bool quit;
-        string currentIp = "", reason = "请先锁定允许的公网 IPv4", checkedAt = "", topology = "";
-        int epoch;
-        int checkRequested;
-        string detection = "";
-        long lastVerified;
-        DateTime nextCheck = DateTime.MinValue;
-        public Guard() { config = Data.Load(); wifi = new WifiWatch(why => Observe(why, true)); probe=new ClaudeProbe(Emit); RefreshAdapters(); }
+        string topology="",detection="";
+        static string ServiceName(string service) { return service=="claude" ? "Claude" : "ChatGPT"; }
+        IEnumerable<Session> AllSessions { get { return runtimes.Values.SelectMany(r=>r.sessions); } }
+        public Guard() { config = Data.Load(); wifi = new WifiWatch(why => Observe(why, true)); probe=new ServiceProbe(Emit); RefreshAdapters(); }
         void Emit(object message) { lock(output) { Console.WriteLine(Data.Json().Serialize(message)); Console.Out.Flush(); } }
         void Log(string level, string message) {
             object entry = new { time = DateTimeOffset.Now.ToString("o"), level = level, message = message };
@@ -53,15 +49,17 @@ namespace IpGuard {
                 }
             } catch (Exception e) { Console.Error.WriteLine("日志写入失败: " + e.Message); }
         }
+        object ServiceSnapshot(string service) {
+            ServiceRuntime r=runtimes[service]; Rule rule=config.services[service];
+            return new { ready=r.healthy,checking=r.checking,currentIp=r.currentIp,adapter=r.adapter,lastChecked=r.checkedAt,reason=r.reason,rulesLocked=rule.rulesLocked,enabled=rule.enabled,settings=rule.settings };
+        }
         public object Snapshot() {
             lock(state) return new {
-                online = true,
-                admin = SystemPolicy.Admin, ready = healthy, currentIp = currentIp, adapter = NetworkProbe.Adapter,
-                checking=checking, nativeVersion=BuildInfo.Version, ipSource=config.settings.service=="chatgpt" ? BuildInfo.ChatgptEndpoint : config.settings.service=="both" ? BuildInfo.Endpoint+" + "+BuildInfo.ChatgptEndpoint : BuildInfo.Endpoint,
-                networkAdapters=adapters, watchedAdapter=watchedAdapter, networkAdapterId=config.networkAdapterId,
-                lastChecked = checkedAt, reason = reason, running = sessions.Where(s => !s.stopped).Select(s => s.appId).Distinct().ToArray(),
-                detection = detection,
-                autostart = config.autostart, rulesLocked = config.rulesLocked, settings = config.settings, apps = config.apps.ToArray(), logs = logs.ToArray()
+                online=true,admin=SystemPolicy.Admin,nativeVersion=BuildInfo.Version,
+                services=new { claude=ServiceSnapshot("claude"),chatgpt=ServiceSnapshot("chatgpt") },
+                networkAdapters=adapters,watchedAdapter=watchedAdapter,networkAdapterId=config.networkAdapterId,
+                detection=detection,running=AllSessions.Where(s=>!s.stopped).Select(s=>s.appId).Distinct().ToArray(),
+                autostart=config.autostart,apps=config.apps.ToArray(),logs=logs.ToArray()
             };
         }
         void Publish() { Emit(new { type = "snapshot", data = Snapshot() }); }
@@ -69,57 +67,65 @@ namespace IpGuard {
             bool changed;
             lock(state) {
                 changed = detection != message; detection = message;
-                if(networkChanged) Interlocked.Exchange(ref checkRequested,1);
+                if(networkChanged) foreach(ServiceRuntime r in runtimes.Values) Interlocked.Exchange(ref r.checkRequested,1);
             }
-            if(changed) { Log("info",message); Publish(); }
+            if(changed) { if(!networkChanged) Log("info",message); Publish(); }
         }
-        public void Trip(string why, bool preserveIp = false) {
-            bool changed;
+        void Trip(string service,string why,bool preserveIp=false) {
+            ServiceRuntime r=runtimes[service]; bool changed;
             lock(state) {
-                changed = healthy || reason != why || sessions.Any(s => !s.stopped);
-                healthy = false; reason = why; epoch++; pendingBlock = pendingBlock || changed;
-                if(!preserveIp) currentIp = "";
-                foreach(Session s in sessions) { s.stopped = true; Win32.TerminateJobObject(s.job, 1); }
+                changed=r.healthy || r.reason!=why || r.sessions.Any(s=>!s.stopped);
+                foreach(Session session in r.Revoke(why,preserveIp)) Win32.TerminateJobObject(session.job,1);
             }
-            if(changed) { Log("warning", why); Publish(); }
+            if(changed) { Log("warning",ServiceName(service)+" · "+why); Publish(); }
         }
+        void TripAll(string why) { foreach(string service in runtimes.Keys) Trip(service,why); }
         void BlockPending() {
-            bool block; lock(state) { block = pendingBlock; pendingBlock = false; }
-            if(!block || !SystemPolicy.Admin) return;
-            Target[] targets;
-            lock(state) targets = config.apps.Where(t => t.enabled && (!healthy || !sessions.Any(s => s.appId == t.id && !s.stopped))).ToArray();
-            foreach(Target t in targets) {
-                try { SystemPolicy.Block(t, true); }
-                catch(Exception e) { lock(state) pendingBlock = true; Log("error", "封锁失败 · " + t.name + " · " + e.Message); }
+            foreach(string service in runtimes.Keys) {
+                ServiceRuntime r=runtimes[service]; bool block;
+                lock(state) { block=r.pendingBlock; r.pendingBlock=false; }
+                if(!block || !SystemPolicy.Admin) continue;
+                Target[] targets;
+                lock(state) targets=config.apps.Where(t=>t.service==service && t.enabled && (!r.healthy || !r.sessions.Any(s=>s.appId==t.id && !s.stopped))).ToArray();
+                foreach(Target target in targets) try { SystemPolicy.Block(target,true); }
+                catch(Exception e) { lock(state) r.pendingBlock=true; Log("error","封锁失败 · "+target.name+" · "+e.Message); }
             }
         }
-        bool Check(Action<ProbeProgress> progress = null) {
-            DateTime started=DateTime.UtcNow;
-            Interlocked.Exchange(ref checkRequested,0);
-            int startEpoch; lock(state) startEpoch = epoch;
-            lock(state) checking=true; Publish();
+        bool Check(string service,Action<ProbeProgress> progress=null) {
+            ServiceRuntime r=runtimes[service];
+            lock(r.gate) return CheckLocked(service,progress);
+        }
+        bool CheckLocked(string service,Action<ProbeProgress> progress=null) {
+            ServiceRuntime r=runtimes[service]; Rule rule=config.services[service];
+            Interlocked.Exchange(ref r.checkRequested,0);
+            int startEpoch; lock(state) { startEpoch=r.epoch; r.checking=true; }
+            Publish();
             try {
-                ClaudeProbeResult result=probe.Read(config.settings.service,progress); string ip=result.ip;
-                lock(state) { currentIp=ip; checkedAt=result.checkedAt; NetworkProbe.Adapter=result.adapter ?? ""; }
-                if(!config.rulesLocked) { lock(state) { healthy=false; reason="IP 未锁定，请先锁定允许的公网 IPv4"; } return false; }
-                if(progress!=null) {
-                    try {
-                        TimeZoneInfo zone=TimeZoneInfo.Local;
-                        TimeSpan offset=zone.GetUtcOffset(DateTime.Now);
-                        progress(new ProbeProgress("timezone","本机时区",zone.Id=="China Standard Time" ? "warning" : "info","UTC"+(offset<TimeSpan.Zero ? "-" : "+")+offset.Duration().ToString(@"hh\:mm")+" · "+(zone.IsDaylightSavingTime(DateTime.Now) ? zone.DaylightName : zone.StandardName)));
-                    } catch(Exception) { progress(new ProbeProgress("timezone","本机时区","unknown","未取得时区信息")); }
-                    progress(new ProbeProgress("match","锁定地址",ip==config.settings.expectedIp ? "ok" : "error",ip==config.settings.expectedIp ? "IPv4 完全匹配" : "IPv4 与锁定地址不同"));
+                if(!rule.enabled || !rule.rulesLocked) {
+                    lock(state) { r.healthy=false; r.reason=rule.rulesLocked ? "该服务已暂停，连接保持阻断" : "请先锁定该服务允许的公网 IPv4"; }
+                    return false;
                 }
-                if(ip != config.settings.expectedIp) { Trip("公网 IPv4 与允许地址不匹配，已阻断",true); BlockPending(); return false; }
+                ServiceProbeResult result=probe.Read(service,progress); string ip=result.ip;
+                lock(state) { r.currentIp=ip; r.checkedAt=result.checkedAt; r.adapter=result.adapter ?? ""; }
+                if(progress!=null) progress(new ProbeProgress("match","锁定地址",ip==rule.settings.expectedIp ? "ok" : "error",ip==rule.settings.expectedIp ? "IPv4 完全匹配" : "IPv4 与该服务锁定地址不同"));
+                if(ip!=rule.settings.expectedIp) {
+                    Trip(service,"出口 IPv4 不符 · 实测 "+ip+" · 锁定 "+rule.settings.expectedIp+" · 仅阻断该服务",true);
+                    return false;
+                }
                 lock(state) {
-                    if(startEpoch != epoch) return false;
-                    healthy = true; reason = ""; lastVerified = Stopwatch.GetTimestamp();
+                    if(startEpoch!=r.epoch) return false;
+                    r.healthy=true; r.reason=""; r.lastVerified=Stopwatch.GetTimestamp();
                 }
                 return true;
-            } catch(Exception e) {
-                lock(state) { checkedAt = DateTimeOffset.Now.ToString("o"); }
-                Trip("公网 IPv4 校验失败 · " + e.GetBaseException().Message); BlockPending(); return false;
-            } finally { lock(state) checking=false; nextCheck = Interlocked.Exchange(ref checkRequested,0)==1 ? DateTime.MinValue : started.AddSeconds(config.settings.intervalSeconds); Publish(); }
+            } catch(Exception error) {
+                lock(state) r.checkedAt=DateTimeOffset.Now.ToString("o");
+                Trip(service,"出口检测失败（未确认 IP 变化） · "+error.GetBaseException().Message+" · 仅阻断该服务");
+                return false;
+            } finally {
+                lock(state) r.checking=false;
+                r.nextCheck=Interlocked.Exchange(ref r.checkRequested,0)==1 ? DateTime.MinValue : DateTime.UtcNow.AddSeconds(rule.settings.intervalSeconds);
+                Publish();
+            }
         }
         Target Find(string id) {
             Target t = config.apps.SingleOrDefault(a => a.id == id);
@@ -132,13 +138,13 @@ namespace IpGuard {
             }
         }
         void StopTarget(string id) {
-            lock(state) foreach(Session s in sessions.Where(s => s.appId == id)) { s.stopped = true; Win32.TerminateJobObject(s.job, 1); }
+            lock(state) foreach(Session s in AllSessions.Where(s => s.appId == id)) { s.stopped = true; Win32.TerminateJobObject(s.job, 1); }
         }
         void Protect(Target t, bool enabled) {
-            if(enabled && !config.rulesLocked) throw new Exception("请先锁定允许的公网 IPv4，再启用程序防护。");
+            if(enabled && !config.services[t.service].rulesLocked) throw new Exception("请先锁定允许的公网 IPv4，再启用程序防护。");
             SystemPolicy.RequireAdmin(); StopTarget(t.id);
             if(enabled) {
-                Data.Validate(config.settings); Data.Validate(t, true); RequireClosed(t); SystemPolicy.FirewallHealthy();
+                Data.Validate(config.services[t.service].settings); Data.Validate(t, true); RequireClosed(t); SystemPolicy.FirewallHealthy();
                 SystemPolicy.Block(t, true);
                 try { SystemPolicy.Intercept(t); t.enabled = true; Data.Save(config); }
                 catch { SystemPolicy.Unintercept(t); SystemPolicy.RemoveFirewall(t); t.enabled = false; throw; }
@@ -151,27 +157,30 @@ namespace IpGuard {
             string action = input["action"] as string;
             lock(actions) {
                 if(action == "status") return Snapshot();
-                if(action == "check") { Check(); return Snapshot(); }
+                if(action == "check") { string key=input["service"] as string; Data.ValidateService(key); Check(key); return Snapshot(); }
                 SystemPolicy.RequireAdmin();
-                if(action == "lock") {
-                    if(config.rulesLocked) throw new Exception("IP 已锁定，请先取消锁定再修改。");
-                    Settings s = Data.Json().Deserialize<Settings>(Data.Json().Serialize(input["settings"])); Data.Validate(s);
-                    Data.Save(new Config { settings=s, apps=config.apps, autostart=config.autostart, rulesLocked=true, networkAdapterId=config.networkAdapterId, networkAdapterName=config.networkAdapterName });
-                    lock(state) { config.settings = s; config.rulesLocked = true; healthy = false; currentIp = ""; reason = "正在校验锁定的公网 IPv4"; }
-                    Log("info", "允许的公网 IPv4 已锁定"); Check();
-                } else if(action == "service:set") {
-                    string service=input["service"] as string; Data.ValidateService(service);
-                    if(service==config.settings.service) return Snapshot();
-                    Settings next=new Settings { service=service, expectedIp="", intervalSeconds=config.settings.intervalSeconds };
-                    Data.Save(new Config { settings=next, apps=config.apps, autostart=config.autostart, rulesLocked=false, networkAdapterId=config.networkAdapterId, networkAdapterName=config.networkAdapterName });
-                    lock(state) { config.settings=next; config.rulesLocked=false; healthy=false; currentIp=""; }
-                    Trip("防护服务已切换，受保护程序已停止，请重新获取并锁定地址"); BlockPending();
-                    Log("info","防护服务已切换 · "+service+" · 旧地址已清除");
-                } else if(action == "unlock") {
-                    if(!config.rulesLocked) return Snapshot();
-                    Data.Save(new Config { settings=config.settings, apps=config.apps, autostart=config.autostart, rulesLocked=false, networkAdapterId=config.networkAdapterId, networkAdapterName=config.networkAdapterName });
-                    lock(state) { config.rulesLocked = false; healthy = false; }
-                    Trip("IP 已取消锁定，受保护程序已停止，请重新锁定"); BlockPending();
+                if(action=="lock" || action=="unlock" || action=="service:enable") {
+                    string key=input["service"] as string; Data.ValidateService(key);
+                    ServiceRuntime r=runtimes[key];
+                    lock(r.gate) {
+                        Rule prior=config.services[key]; Rule next;
+                        if(action=="lock") {
+                            if(prior.rulesLocked) throw new Exception("请先取消该服务的锁定再修改。");
+                            Settings settings=Data.Json().Deserialize<Settings>(Data.Json().Serialize(input["settings"])); Data.Validate(settings);
+                            next=new Rule { settings=settings,rulesLocked=true,enabled=true };
+                        } else if(action=="unlock") next=new Rule { settings=prior.settings,rulesLocked=false,enabled=false };
+                        else {
+                            bool enabled=(bool)input["enabled"];
+                            if(enabled && !prior.rulesLocked) throw new Exception("请先锁定该服务允许的公网 IPv4。");
+                            next=new Rule { settings=prior.settings,rulesLocked=prior.rulesLocked,enabled=enabled };
+                        }
+                        var services=new Dictionary<string,Rule>(config.services); services[key]=next;
+                        Save(services,config.apps);
+                        Trip(key,action=="unlock" ? "IP 已取消锁定，仅该服务已阻断" : next.enabled ? "正在校验该服务锁定的公网 IPv4" : "该服务已暂停，连接保持阻断");
+                        if(next.enabled) CheckLocked(key);
+                        BlockPending();
+                        Log("info",ServiceName(key)+" · "+(next.enabled ? "已启用独立规则" : "已停止独立规则"));
+                    }
                 } else if(action == "adapter:set") {
                     string id=input["adapterId"] as string;
                     AdapterInfo chosen=id=="" ? null : NetworkProbe.Adapters().SingleOrDefault(n=>n.id==id);
@@ -192,17 +201,17 @@ namespace IpGuard {
                     Target t = Find(input["targetId"] as string);
                     if(action == "protect") Protect(t, (bool)input["enabled"]);
                     else if(action == "edit") {
-                        Target changed=new Target { id=t.id,path=t.path,enabled=t.enabled,name=input["name"] as string,arguments=input["arguments"] as string };
+                        Target changed=new Target { id=t.id,path=t.path,service=input["service"] as string,enabled=t.enabled,name=input["name"] as string,arguments=input["arguments"] as string };
                         Data.Validate(changed,false);
+                        if(changed.service!=t.service && (t.enabled || AllSessions.Any(session=>session.appId==t.id && !session.stopped))) throw new Exception("请先解除该程序防护，再修改归属服务。");
                         List<Target> next=config.apps.Select(a=>a.id==t.id ? changed : a).ToList();
-                        Data.Save(new Config { settings=config.settings,apps=next,autostart=config.autostart,rulesLocked=config.rulesLocked,networkAdapterId=config.networkAdapterId,networkAdapterName=config.networkAdapterName });
-                        lock(state) config.apps=next;
+                        Save(config.services,next);
                         Log("info",changed.name+" · 启动配置已更新");
                     }
                     else if(action == "remove") { if(t.enabled) Protect(t, false); lock(state) config.apps.Remove(t); Data.Save(config); }
                     else if(action == "stop") { StopTarget(t.id); SystemPolicy.Block(t,true); Log("info", t.name + " · 已停止并封锁"); }
                     else if(action == "start") {
-                        if(!config.rulesLocked) throw new Exception("请先锁定允许的公网 IPv4。");
+                        if(!config.services[t.service].rulesLocked || !config.services[t.service].enabled) throw new Exception("请先锁定并开启该程序所属服务。");
                         if(!t.enabled) throw new Exception("请先启用该程序的防护。");
                         Data.Validate(t, true);
                         if(PackagePolicy.Find(t.path)!=null) Background(() => {
@@ -215,19 +224,21 @@ namespace IpGuard {
                 return Snapshot();
             }
         }
-        void Loop() {
+        void Save(Dictionary<string,Rule> services,List<Target> apps) {
+            Data.Save(new Config { services=services,apps=apps,autostart=config.autostart,networkAdapterId=config.networkAdapterId,networkAdapterName=config.networkAdapterName });
+            lock(state) { config.services=services; config.apps=apps; }
+        }
+        void Loop(string service) {
+            ServiceRuntime r=runtimes[service];
             while(!quit) {
                 try {
-                    if(Monitor.TryEnter(actions)) {
-                        try {
-                            BlockPending();
-                            if(DateTime.UtcNow >= nextCheck || Interlocked.CompareExchange(ref checkRequested,0,0)==1) {
-                                Check();
-                            }
-                        } finally { Monitor.Exit(actions); }
+                    if(Monitor.TryEnter(r.gate)) {
+                        try { if(DateTime.UtcNow>=r.nextCheck || Interlocked.CompareExchange(ref r.checkRequested,0,0)==1) CheckLocked(service); }
+                        finally { Monitor.Exit(r.gate); }
                     }
-                } catch(Exception e) { Observe("守护状态检测异常 · " + e.GetBaseException().Message); }
-                Thread.Sleep(500);
+                    if(Monitor.TryEnter(actions)) { try { BlockPending(); } finally { Monitor.Exit(actions); } }
+                } catch(Exception e) { Observe(ServiceName(service)+" · 守护状态检测异常 · "+e.GetBaseException().Message); }
+                Thread.Sleep(200);
             }
         }
         void WatchNetwork() {
@@ -236,7 +247,7 @@ namespace IpGuard {
                     RefreshAdapters();
                     string now = NetworkProbe.Fingerprint(); string prior;
                     lock(state) { prior=topology; topology=now; }
-                    if(prior!="" && now!=prior) Observe("网卡或路由发生变化",true);
+                    if(prior!="" && now!=prior) Observe("本机 IPv4 或路由配置更新，正在复核服务出口",true);
                     wifi.Ensure();
                 } catch(Exception e) { Observe("网络状态检测异常 · " + e.Message); }
                 Thread.Sleep(500);
@@ -275,8 +286,9 @@ namespace IpGuard {
             if(process==IntPtr.Zero) return false;
             try {
                 lock(state) {
-                    if(!healthy || !config.rulesLocked || lastVerified==0 || Stopwatch.GetTimestamp()-lastVerified>Stopwatch.Frequency*(config.settings.intervalSeconds+8)) return false;
-                    foreach(Session session in sessions.Where(s=>s.appId==appId && !s.stopped && s.epoch==epoch)) {
+                    Target target=Find(appId); ServiceRuntime r=runtimes[target.service]; Rule rule=config.services[target.service];
+                    if(!rule.enabled || !rule.rulesLocked || !r.Fresh(rule.settings.intervalSeconds)) return false;
+                    foreach(Session session in r.sessions.Where(s=>s.appId==appId && !s.stopped && s.epoch==r.epoch)) {
                         bool inside;
                         Win32.Check(Win32.IsProcessInJob(process,session.job,out inside),"无法核对受保护进程树");
                         if(inside) return true;
@@ -286,7 +298,7 @@ namespace IpGuard {
             } finally { Win32.CloseHandle(process); }
         }
         void GateSession(NamedPipeServerStream pipe) {
-            Session session = null; Target target = null;
+            Session session = null; Target target = null; ServiceRuntime r=null; Rule rule=null;
             try {
             using(pipe) using(StreamReader reader = new StreamReader(pipe,new UTF8Encoding(false),false,1024,true)) using(StreamWriter writer = new PipeWriter(pipe)) {
                 try {
@@ -302,9 +314,11 @@ namespace IpGuard {
                     bool inherited=request.ContainsKey("inherit") && request["inherit"] is bool && (bool)request["inherit"];
                     lock(actions) {
                         target = Find(request["id"] as string);
+                        r=runtimes[target.service]; rule=config.services[target.service];
+                        lock(r.gate) {
                         if(!target.enabled || !String.Equals(target.path,request["path"] as string,StringComparison.OrdinalIgnoreCase)) throw new Exception("该程序未启用启动防护。");
-                        writer.WriteLine(Data.Json().Serialize(new { type="context", name=target.name, expectedIp=config.settings.expectedIp }));
-                        if(!config.rulesLocked) throw new Exception("请先锁定允许的公网 IPv4。");
+                        writer.WriteLine(Data.Json().Serialize(new { type="context", name=target.name, expectedIp=rule.settings.expectedIp }));
+                        if(!rule.rulesLocked || !rule.enabled) throw new Exception("请先锁定并开启该服务的防护。");
                         if(PackagePolicy.Find(target.path)!=null) {
                             if(!request.ContainsKey("package") || !(bool)request["package"]) throw new Exception("请通过 Desktop 原快捷方式或 IP Guard 的启动按钮打开安装包。");
                             Win32.ProcessInfo existing=PackagePolicy.OpenTarget(target,Convert.ToUInt32(request["pid"]),Convert.ToUInt32(request["tid"]));
@@ -321,37 +335,38 @@ namespace IpGuard {
                         progress(new ProbeProgress("security","系统防护","ok","锁定与防火墙已就绪"));
                         if(inherited) {
                             if(!CanInherit(pipe,target.id)) throw new Exception("原启动许可已失效，子进程启动已阻断。");
-                        } else if(!Check(progress)) throw new Exception(reason);
+                        } else if(!CheckLocked(target.service,progress)) throw new Exception(r.reason);
                         if(disconnected) throw new IOException("启动校验窗口已关闭。");
                         string name = "Local\\IPGuard-" + Guid.NewGuid().ToString("D");
                         lock(state) {
-                            if(!healthy) throw new Exception(reason);
-                            session = new Session { appId=target.id, name=name, job=Win32.NewJob(name), epoch=epoch };
-                            sessions.Add(session);
+                            if(!r.healthy) throw new Exception(r.reason);
+                            session = new Session { appId=target.id, name=name, job=Win32.NewJob(name), epoch=r.epoch };
+                            r.sessions.Add(session);
                         }
-                        writer.WriteLine(Data.Json().Serialize(new { allow=true, job=name, currentIp=currentIp, expectedIp=config.settings.expectedIp }));
+                        writer.WriteLine(Data.Json().Serialize(new { allow=true, job=name, currentIp=r.currentIp, expectedIp=rule.settings.expectedIp }));
                         Task<string> started = Task.Run(() => reader.ReadLine());
                         if(!started.Wait(8000) || started.Result != "started") throw new Exception("目标进程未完成启动准备。");
                         SystemPolicy.Block(target,false);
-                        lock(state) { if(session.stopped || session.epoch != epoch || !healthy) throw new Exception("启动许可已撤销。"); writer.WriteLine("run"); }
+                        lock(state) { if(session.stopped || session.epoch != r.epoch || !r.healthy) throw new Exception("启动许可已撤销。"); writer.WriteLine("run"); }
+                        }
                     }
                     if(!inherited) Log("info", target.name + " · 校验通过，已启动"); Publish();
                     Task<string> alive = Task.Run(() => reader.ReadLine());
                     while(!quit && !session.stopped && !alive.IsCompleted) {
                         bool stale;
                         lock(state) {
-                            if(session.epoch != epoch || !healthy) break;
-                            stale = Stopwatch.GetTimestamp()-lastVerified > Stopwatch.Frequency*(config.settings.intervalSeconds+8);
+                            if(session.epoch != r.epoch || !r.healthy) break;
+                            stale = !r.Fresh(rule.settings.intervalSeconds);
                             if(!stale) writer.WriteLine("lease");
                         }
-                        if(stale) { Trip("公网检测结果已过期，已结束受保护程序"); break; }
+                        if(stale) { Trip(target.service,"该服务出口检测结果已过期，仅结束该服务程序"); break; }
                         Thread.Sleep(400);
                     }
                 } catch(Exception e) {
                     Log("warning", (target == null ? "启动拦截" : target.name) + " · " + e.GetBaseException().Message);
-                    try { writer.WriteLine(Data.Json().Serialize(new { allow=false, currentIp=currentIp, expectedIp=config.settings.expectedIp, error=e.GetBaseException().Message, code=e.GetBaseException() is FirewallDisabledException ? FirewallDisabledException.Code : "" })); } catch(IOException) { }
+                    try { writer.WriteLine(Data.Json().Serialize(new { allow=false, currentIp=r==null ? "" : r.currentIp, expectedIp=rule==null ? "" : rule.settings.expectedIp, error=e.GetBaseException().Message, code=e.GetBaseException() is FirewallDisabledException ? FirewallDisabledException.Code : "" })); } catch(IOException) { }
                 } finally {
-                    if(session != null) lock(state) { session.stopped=true; Win32.TerminateJobObject(session.job,1); Win32.CloseHandle(session.job); sessions.Remove(session); pendingBlock=true; }
+                    if(session != null) lock(state) { session.stopped=true; Win32.TerminateJobObject(session.job,1); Win32.CloseHandle(session.job); r.sessions.Remove(session); r.pendingBlock=true; }
                     Publish();
                 }
             }
@@ -360,14 +375,14 @@ namespace IpGuard {
         public void Run() {
             try { BrowserHost.Register(true); } catch(Exception error) { Log("error","浏览器连接注册失败 · "+error.Message); }
             if(config.apps.Any(t => t.enabled) && SystemPolicy.Admin) {
-                Trip("守护程序已启动，等待重新校验"); BlockPending();
+                TripAll("守护程序已启动，等待重新校验"); BlockPending();
                 foreach(Target t in config.apps.Where(t => t.enabled)) { Data.Validate(t,true); SystemPolicy.Intercept(t); }
             }
             NetworkChange.NetworkAddressChanged += NetworkChanged;
             NetworkChange.NetworkAvailabilityChanged += AvailabilityChanged;
             SystemEvents.PowerModeChanged += PowerChanged;
             if(SystemPolicy.Admin) Background(Listen);
-            Background(Dispatch); Background(Loop); Background(WatchNetwork); Publish();
+            Background(Dispatch); Background(()=>Loop("claude")); Background(()=>Loop("chatgpt")); Background(WatchNetwork); Publish();
             try {
                 string line;
                 while((line=Console.ReadLine()) != null) {
@@ -382,7 +397,7 @@ namespace IpGuard {
                     } catch(Exception e) { Emit(new { id=id, ok=false, error=e.GetBaseException().Message, code=e.GetBaseException() is FirewallDisabledException ? FirewallDisabledException.Code : "", help=e.GetBaseException() is FirewallDisabledException ? FirewallDisabledException.Help : "" }); }
                 }
             } finally {
-                quit=true; probe.Stop(); commands.CompleteAdding(); Trip("守护程序已退出，受保护程序已结束");
+                quit=true; probe.Stop(); commands.CompleteAdding(); TripAll("守护程序已退出，受保护程序已结束");
                 lock(actions) BlockPending();
                 NetworkChange.NetworkAddressChanged -= NetworkChanged; NetworkChange.NetworkAvailabilityChanged -= AvailabilityChanged; SystemEvents.PowerModeChanged -= PowerChanged;
                 wifi.Dispose();
@@ -396,8 +411,9 @@ namespace IpGuard {
                 catch(Exception e) { Emit(new { id=id,ok=false,error=e.GetBaseException().Message,code=e.GetBaseException() is FirewallDisabledException ? FirewallDisabledException.Code : "",help=e.GetBaseException() is FirewallDisabledException ? FirewallDisabledException.Help : "" }); }
             }
         }
-        void NetworkChanged(object sender,EventArgs e) { Observe("网卡地址发生变化",true); }
-        void AvailabilityChanged(object sender,NetworkAvailabilityEventArgs e) { Observe(e.IsAvailable ? "网络连接已切换" : "网络已断开",true); }
+        void NetworkChanged(object sender,EventArgs e) { RequestNetworkCheck(); }
+        void AvailabilityChanged(object sender,NetworkAvailabilityEventArgs e) { RequestNetworkCheck(); }
+        void RequestNetworkCheck() { foreach(ServiceRuntime r in runtimes.Values) Interlocked.Exchange(ref r.checkRequested,1); }
         void PowerChanged(object sender,PowerModeChangedEventArgs e) { Observe("系统电源状态改变",true); }
     }
 }

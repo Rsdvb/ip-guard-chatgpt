@@ -4,9 +4,18 @@ import { session } from "electron";
 import type { Session } from "electron";
 
 import { ipv4Schema, services } from "@ip-guard/electron";
-import type { SingleService } from "@ip-guard/electron";
+import type { Service } from "@ip-guard/electron";
 
-import type { ExitResult } from "#src/main/exit-policy.ts";
+import { readServiceExit } from "#src/main/exit-retry.ts";
+
+export interface ExitResult {
+  ip: string;
+  error: string;
+  checkedAt: string;
+  adapter: string;
+  status: number;
+  ms: number;
+}
 
 export interface ProbeProgress {
   step: string;
@@ -53,8 +62,8 @@ export class ExitIPv4 extends EventEmitter<{
   private pending: Promise<ExitResult> | undefined;
   private abort = new AbortController();
   private transport: Session | undefined;
-  private service: SingleService;
-  constructor(service: SingleService) {
+  private service: Service;
+  constructor(service: Service) {
     super();
     this.service = service;
   }
@@ -67,7 +76,10 @@ export class ExitIPv4 extends EventEmitter<{
   check(): Promise<ExitResult> {
     if (this.pending) return this.pending;
     this.steps = [];
-    this.pending = this.read()
+    this.pending = readServiceExit(
+      (timeoutMs) => this.read(timeoutMs),
+      () => !this.abort.signal.aborted,
+    )
       .then((result) => {
         this.latest = result;
         this.emit("update", result);
@@ -81,11 +93,11 @@ export class ExitIPv4 extends EventEmitter<{
   stop() {
     this.abort.abort();
   }
-  private async read(): Promise<ExitResult> {
+  private async read(timeoutMs: number): Promise<ExitResult> {
     const { endpoint, name } = services[this.service];
     const hostname = new URL(endpoint).hostname;
     const started = performance.now();
-    const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(4500)]);
+    const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(timeoutMs)]);
     let status = 0,
       adapter = "";
     this.progress({ step: "dns", label: "DNS 解析", status: "running", detail: hostname });

@@ -1,20 +1,17 @@
 import { z } from "zod";
 
-import { serviceSchema, serviceSource, singleServiceSchema } from "./services.ts";
+import { serviceSchema } from "./services.ts";
 export { formatIPText } from "./ip-display.ts";
 export * from "./services.ts";
 export * from "./browser-policy.ts";
 
-export const nativeVersion = "0.10.1";
-export const nativeProtocol = 8;
+export const nativeVersion = "0.11.0";
+export const nativeProtocol = 9;
 export const browserExtensionId = "blmgamidelconfabgilaacbkokomegep";
 export const browserHostName = "com.ipguard.browser";
-export const browserStateSchema = z
+export const browserPermissionSchema = z
   .object({
-    protocol: z.literal(2),
-    service: serviceSchema,
-    appVersion: z.string(),
-    phase: z.enum(["allowed", "blocked", "offline", "unlocked", "checking"]),
+    phase: z.enum(["allowed", "blocked", "offline", "unlocked", "checking", "paused"]),
     currentIp: z.union([z.literal(""), z.ipv4()]),
     expectedIp: z.union([z.literal(""), z.ipv4()]),
     checkedAt: z.string(),
@@ -25,7 +22,20 @@ export const browserStateSchema = z
       value.phase !== "allowed" || (value.currentIp !== "" && value.currentIp === value.expectedIp),
     { message: "Invalid IPv4 permission" },
   );
+export type BrowserPermission = z.infer<typeof browserPermissionSchema>;
+export const browserStateSchema = z.object({
+  protocol: z.literal(3),
+  appVersion: z.string(),
+  services: z.object({ claude: browserPermissionSchema, chatgpt: browserPermissionSchema }),
+});
 export type BrowserState = z.infer<typeof browserStateSchema>;
+export const offlineBrowserPermission = (reason = "请启动 IP Guard"): BrowserPermission => ({
+  phase: "offline",
+  currentIp: "",
+  expectedIp: "",
+  checkedAt: "",
+  reason,
+});
 export const extensionStatusSchema = z.object({
   phase: z.enum(["running", "installed", "missing", "unknown"]),
   installedBrowsers: z.array(z.enum(["Chrome", "Edge"])),
@@ -52,7 +62,7 @@ export const coffeeMetricSchema = z.object({
   status: z.enum(["neutral", "ok", "info", "warning", "error", "unknown"]),
 });
 export const coffeeReportSchema = z.object({
-  service: singleServiceSchema,
+  service: serviceSchema,
   phase: z.enum(["idle", "running", "complete"]),
   checkedAt: z.string(),
   error: z.string(),
@@ -104,11 +114,11 @@ export type UpdateState = z.infer<typeof updateStateSchema>;
 export const ipv4Schema = z.ipv4();
 export const ipv6Schema = z.ipv6();
 export const settingsSchema = z.object({
-  service: serviceSchema.default("claude"),
   expectedIp: ipv4Schema,
   intervalSeconds: z.number().int().min(1).max(60),
 });
 export const appSchema = z.object({
+  service: serviceSchema,
   id: z.uuid(),
   name: z.string().min(1).max(100),
   path: z.string().min(4).max(1024),
@@ -128,41 +138,42 @@ export const adapterSchema = z.object({
   ipv4: z.boolean(),
   error: z.string(),
 });
-export const snapshotSchema = z.object({
-  online: z.boolean(),
-  admin: z.boolean(),
+export const serviceSnapshotSchema = z.object({
   ready: z.boolean(),
   checking: z.boolean(),
-  nativeVersion: z.literal(nativeVersion),
-  ipSource: z.enum([serviceSource("claude"), serviceSource("chatgpt"), serviceSource("both")]),
   currentIp: z.string(),
   adapter: z.string(),
   lastChecked: z.string(),
   reason: z.string(),
+  rulesLocked: z.boolean(),
+  enabled: z.boolean(),
+  settings: z.object({ expectedIp: z.string(), intervalSeconds: z.number().int().min(1).max(60) }),
+});
+export type ServiceSnapshot = z.infer<typeof serviceSnapshotSchema>;
+export const snapshotSchema = z.object({
+  online: z.boolean(),
+  admin: z.boolean(),
+  nativeVersion: z.literal(nativeVersion),
+  services: z.object({ claude: serviceSnapshotSchema, chatgpt: serviceSnapshotSchema }),
   detection: z.string(),
   running: z.array(z.string()),
   autostart: z.boolean(),
-  rulesLocked: z.boolean(),
   networkAdapters: z.array(adapterSchema),
   watchedAdapter: adapterSchema,
   networkAdapterId: z.string(),
-  settings: z.object({
-    expectedIp: z.string(),
-    intervalSeconds: z.number(),
-    service: serviceSchema.default("claude"),
-  }),
   apps: z.array(appSchema),
   logs: z.array(logSchema),
 });
 export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("status") }),
-  z.object({ action: z.literal("check") }),
-  z.object({ action: z.literal("lock"), settings: settingsSchema }),
-  z.object({ action: z.literal("unlock") }),
-  z.object({ action: z.literal("service:set"), service: serviceSchema }),
+  z.object({ action: z.literal("check"), service: serviceSchema }),
+  z.object({ action: z.literal("lock"), service: serviceSchema, settings: settingsSchema }),
+  z.object({ action: z.literal("unlock"), service: serviceSchema }),
+  z.object({ action: z.literal("service:enable"), service: serviceSchema, enabled: z.boolean() }),
   z.object({ action: z.literal("add"), app: appSchema }),
   z.object({
     action: z.literal("edit"),
+    service: serviceSchema,
     id: z.uuid(),
     name: z.string().min(1).max(100),
     arguments: z.string().max(4096),
@@ -175,14 +186,14 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("pick") }),
   z.object({ action: z.literal("presets") }),
   z.object({ action: z.literal("adapter:set"), adapterId: z.string().max(256) }),
-  z.object({ action: z.literal("ip:current"), service: serviceSchema.default("claude") }),
+  z.object({ action: z.literal("ip:current"), service: serviceSchema }),
   z.object({ action: z.literal("claude:status") }),
   z.object({ action: z.literal("claude:stop") }),
   z.object({ action: z.literal("logs") }),
   z.object({ action: z.literal("elevate") }),
   z.object({ action: z.literal("restart") }),
-  z.object({ action: z.literal("coffee:status"), service: singleServiceSchema }),
-  z.object({ action: z.literal("coffee:refresh"), service: singleServiceSchema }),
+  z.object({ action: z.literal("coffee:status"), service: serviceSchema }),
+  z.object({ action: z.literal("coffee:refresh"), service: serviceSchema }),
   z.object({ action: z.literal("update:status") }),
   z.object({ action: z.literal("update:check") }),
   z.object({ action: z.literal("update:download") }),

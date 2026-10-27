@@ -38,10 +38,11 @@ describe("AI browser protection", () => {
     }
   });
 
-  it("preserves Claude for persisted settings written before service selection existed", () => {
-    expect(settingsSchema.parse({ expectedIp: "8.8.8.8", intervalSeconds: 2 }).service).toBe(
-      "claude",
-    );
+  it("validates one rule without a shared service selection", () => {
+    expect(settingsSchema.parse({ expectedIp: "8.8.8.8", intervalSeconds: 2 })).toEqual({
+      expectedIp: "8.8.8.8",
+      intervalSeconds: 2,
+    });
   });
 
   it("rejects an old browser host that cannot identify the measured service", () => {

@@ -2,20 +2,19 @@ import {
   allowedBrowserDomains,
   browserHostName,
   browserStateSchema,
-  serviceDomains,
+  allServiceDomains,
+  offlineBrowserPermission,
   shouldBlockUrl,
 } from "@ip-guard/electron";
 import type { BrowserState } from "@ip-guard/electron";
 
 let state: BrowserState = {
-  protocol: 2,
-  service: "both",
+  protocol: 3,
   appVersion: "",
-  phase: "offline",
-  currentIp: "",
-  expectedIp: "",
-  checkedAt: "",
-  reason: "正在连接 IP Guard",
+  services: {
+    claude: offlineBrowserPermission("正在连接 IP Guard"),
+    chatgpt: offlineBrowserPermission("正在连接 IP Guard"),
+  },
 };
 let port: chrome.runtime.Port | undefined;
 let lastHeartbeat = 0;
@@ -23,16 +22,15 @@ let reconnect: ReturnType<typeof setTimeout> | undefined;
 let queue = Promise.resolve();
 let permittedDomains = "";
 const fresh = () => Date.now() - lastHeartbeat >= 0 && Date.now() - lastHeartbeat < 3500;
-const offline = (reason: string) => ({
+const offline = (reason: string): BrowserState => ({
   ...state,
-  phase: "offline" as const,
-  currentIp: "",
-  reason,
+  services: { claude: offlineBrowserPermission(reason), chatgpt: offlineBrowserPermission(reason) },
 });
-const allowed = () => state.phase === "allowed" && fresh();
+const allowed = () =>
+  Object.values(state.services).every((rule) => rule.phase === "allowed") && fresh();
 async function blockTabs() {
   const tabs = await chrome.tabs.query({
-    url: serviceDomains("both").flatMap((domain) => [`*://${domain}/*`, `*://*.${domain}/*`]),
+    url: allServiceDomains().flatMap((domain) => [`*://${domain}/*`, `*://*.${domain}/*`]),
   });
   await Promise.all(
     tabs.map(async (tab) => {
@@ -69,7 +67,7 @@ function publish() {
         });
         permittedDomains = policy;
       }
-      if (!permit) await blockTabs();
+      await blockTabs();
       await chrome.storage.session.set({ state, receivedAt: Date.now() });
       await chrome.action.setBadgeText({ text: permit ? "" : "!" });
       await chrome.action.setBadgeBackgroundColor({ color: permit ? "#137e51" : "#a6691a" });
@@ -115,7 +113,7 @@ function connect() {
     void publish();
     reconnect = setTimeout(connect, 3000);
   });
-  next.postMessage({ action: "watch", protocol: 2 });
+  next.postMessage({ action: "watch", protocol: 3 });
 }
 chrome.runtime.onMessage.addListener((input: unknown, sender, reply) => {
   if (sender.id !== chrome.runtime.id || !input || typeof input !== "object") return;

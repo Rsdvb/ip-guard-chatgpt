@@ -9,11 +9,15 @@ using System.Web.Script.Serialization;
 
 namespace IpGuard {
     public sealed class Settings {
-        public string service = "both";
         public string expectedIp = "";
         public int intervalSeconds = 2;
     }
+    public sealed class Rule {
+        public Settings settings = new Settings();
+        public bool rulesLocked, enabled;
+    }
     public sealed class Target {
+        public string service;
         public string id;
         public string name;
         public string path;
@@ -21,11 +25,10 @@ namespace IpGuard {
         public bool enabled;
     }
     public sealed class Config {
-        public Settings settings = new Settings();
+        public int format = 2;
+        public Dictionary<string,Rule> services = new Dictionary<string,Rule> { { "claude",new Rule() }, { "chatgpt",new Rule() } };
         public List<Target> apps = new List<Target>();
         public bool autostart;
-        public bool rulesLocked;
-        public string ipSource = "claude-ai";
         public string networkAdapterId="", networkAdapterName="";
     }
     public static class Data {
@@ -37,26 +40,54 @@ namespace IpGuard {
             string source = File.ReadAllText(ConfigPath);
             bool migrate;
             Config c=Parse(source,out migrate);
-            if(migrate) Save(c);
+            if(migrate) {
+                string backup=ConfigPath+".pre-independent";
+                if(!File.Exists(backup)) File.Copy(ConfigPath,backup);
+                Save(c);
+            }
             return c;
         }
         public static Config Parse(string source,out bool migrate) {
-            Config c = Json().Deserialize<Config>(source);
-            if (c == null || c.settings == null || c.apps == null) throw new Exception("配置文件损坏，请恢复 settings.json.bak 或执行恢复工具。");
             var fields=Json().Deserialize<Dictionary<string,object>>(source);
-            bool legacyLock=!fields.ContainsKey("rulesLocked");
-            migrate=legacyLock || !fields.ContainsKey("ipSource");
-            var settingsFields=fields["settings"] as Dictionary<string,object>;
-            if(settingsFields==null) throw new Exception("防护规则配置无效。");
-            if(!settingsFields.ContainsKey("service")) { c.settings.service="claude"; migrate=true; }
-            ValidateService(c.settings.service);
-            if (legacyLock) c.rulesLocked = c.settings.expectedIp != "";
-            if(c.ipSource!="claude-ai") throw new Exception("IP 来源配置无效，请恢复配置备份。");
-            if (c.rulesLocked || c.settings.expectedIp != "") Validate(c.settings);
-            foreach (Target t in c.apps) Validate(t, false);
-            if (c.apps.Select(t => t.id).Distinct().Count() != c.apps.Count) throw new Exception("配置中有重复程序。");
+            if(fields==null) throw new Exception("配置文件损坏，请恢复备份。");
+            migrate=!fields.ContainsKey("format");
+            Config c=migrate ? MigrateLegacy(source,fields) : Json().Deserialize<Config>(source);
+            if(c==null || c.format!=2 || c.services==null || c.services.Count!=2 || !c.services.ContainsKey("claude") || !c.services.ContainsKey("chatgpt") || c.apps==null) throw new Exception("独立防护配置无效，请恢复备份。");
+            foreach(Rule rule in c.services.Values) {
+                if(rule==null || rule.settings==null) throw new Exception("服务规则配置无效。");
+                if(rule.rulesLocked || rule.settings.expectedIp!="") Validate(rule.settings);
+                if(rule.settings.intervalSeconds<1 || rule.settings.intervalSeconds>60) throw new Exception("检测间隔应为 1–60 秒。");
+                if(rule.enabled && !rule.rulesLocked) throw new Exception("未锁定的服务不能启用。");
+            }
+            foreach(Target t in c.apps) Validate(t,false);
+            if(c.apps.Select(t=>t.id).Distinct().Count()!=c.apps.Count || c.apps.Select(t=>t.path.ToLowerInvariant()).Distinct().Count()!=c.apps.Count) throw new Exception("配置中有重复程序。");
             return c;
         }
+        // 0.9/0.10 deployments persist one shared rule. Remove this reader when those backups no longer need importing.
+        sealed class LegacySettings { public string service="claude"; public string expectedIp=""; public int intervalSeconds=2; }
+        sealed class LegacyConfig {
+            public LegacySettings settings=null; public List<Target> apps=null;
+            public bool autostart=false,rulesLocked=false; public string ipSource="claude-ai";
+            public string networkAdapterId="",networkAdapterName="";
+        }
+        static Config MigrateLegacy(string source,Dictionary<string,object> fields) {
+            LegacyConfig old=Json().Deserialize<LegacyConfig>(source);
+            if(old==null || old.settings==null || old.apps==null || old.ipSource!="claude-ai") throw new Exception("旧配置无效，请恢复备份。");
+            string selected=old.settings.service;
+            if(selected!="both") ValidateService(selected);
+            bool locked=fields.ContainsKey("rulesLocked") ? old.rulesLocked : old.settings.expectedIp!="";
+            Settings settings=new Settings { expectedIp=old.settings.expectedIp,intervalSeconds=old.settings.intervalSeconds };
+            if(locked || settings.expectedIp!="") Validate(settings);
+            Config c=new Config { apps=old.apps,autostart=old.autostart,networkAdapterId=old.networkAdapterId,networkAdapterName=old.networkAdapterName };
+            foreach(string key in new[] { "claude","chatgpt" }) if(selected==key || selected=="both")
+                c.services[key]=new Rule { settings=new Settings { expectedIp=settings.expectedIp,intervalSeconds=settings.intervalSeconds },rulesLocked=locked,enabled=locked };
+            foreach(Target t in c.apps) {
+                string name=Path.GetFileName(t.path ?? "");
+                t.service=String.Equals(name,"ChatGPT.exe",StringComparison.OrdinalIgnoreCase) ? "chatgpt" : String.Equals(name,"Claude.exe",StringComparison.OrdinalIgnoreCase) ? "claude" : selected=="chatgpt" ? "chatgpt" : "claude";
+            }
+            return c;
+        }
+
         public static void Save(Config c) {
             Directory.CreateDirectory(DirectoryPath);
             string temp = ConfigPath + ".tmp";
@@ -76,14 +107,14 @@ namespace IpGuard {
         }
         public static void Validate(Settings s) {
             if (s == null) throw new Exception("请输入有效的防护规则。");
-            ValidateService(s.service);
             if (!PublicV4(s.expectedIp)) throw new Exception("请输入有效的公网 IPv4 地址。");
             if (s.intervalSeconds < 1 || s.intervalSeconds > 60) throw new Exception("检测间隔应为 1–60 秒。");
         }
         public static void ValidateService(string service) {
-            if(service!="claude" && service!="chatgpt" && service!="both") throw new Exception("请选择 Claude、ChatGPT 或同时保护。");
+            if(service!="claude" && service!="chatgpt") throw new Exception("请选择 Claude 或 ChatGPT。");
         }
         public static void Validate(Target t, bool exists) {
+            ValidateService(t==null ? null : t.service);
             Guid id;
             if (t == null || !Guid.TryParseExact(t.id, "D", out id)) throw new Exception("程序标识无效。");
             if (String.IsNullOrWhiteSpace(t.name) || t.name.Length > 100) throw new Exception("请输入程序名称。");

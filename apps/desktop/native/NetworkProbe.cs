@@ -16,7 +16,6 @@ namespace IpGuard {
         public ProbeProgress(string step,string label,string status,string detail) { this.step=step; this.label=label; this.status=status; this.detail=detail; }
     }
     public static class NetworkProbe {
-        public static string Adapter="";
         public static AdapterInfo[] Adapters() {
             return NetworkInterface.GetAllNetworkInterfaces().Where(n=>n.NetworkInterfaceType!=NetworkInterfaceType.Loopback)
                 .Select(n=>{
@@ -40,7 +39,7 @@ namespace IpGuard {
         public static string Fingerprint() {
             string[] adapters=NetworkInterface.GetAllNetworkInterfaces()
                 .Where(n=>n.NetworkInterfaceType!=NetworkInterfaceType.Loopback)
-                .Select(n=>n.Id+":"+n.OperationalStatus+":"+String.Join(",",n.GetIPProperties().UnicastAddresses.Select(a=>a.Address.ToString()).OrderBy(a=>a))+":"+String.Join(",",n.GetIPProperties().GatewayAddresses.Select(a=>a.Address.ToString()).OrderBy(a=>a)))
+                .Select(n=>n.Id+":"+n.OperationalStatus+":"+String.Join(",",n.GetIPProperties().UnicastAddresses.Where(a=>a.Address.AddressFamily==AddressFamily.InterNetwork).Select(a=>a.Address.ToString()).OrderBy(a=>a))+":"+String.Join(",",n.GetIPProperties().GatewayAddresses.Where(a=>a.Address.AddressFamily==AddressFamily.InterNetwork).Select(a=>a.Address.ToString()).OrderBy(a=>a)))
                 .OrderBy(s=>s).ToArray();
             uint size=0; uint result=Win32.GetIpForwardTable(IntPtr.Zero,ref size,true);
             if(result!=122 || size==0) throw new Exception("读取系统路由表失败。");
@@ -50,7 +49,8 @@ namespace IpGuard {
                 int count=Marshal.ReadInt32(table); string[] rows=new string[count];
                 for(int i=0;i<count;i++) {
                     IntPtr row=IntPtr.Add(table,4+i*56);
-                    rows[i]=String.Join(":",new[] {0,4,12,16,20,24,32}.Select(o=>Marshal.ReadInt32(row,o).ToString()));
+                    // Route age and unused fields change without changing IPv4 routing; metric changes do affect it.
+                    rows[i]=String.Join(":",new[] {0,4,12,16,20,24,36}.Select(o=>Marshal.ReadInt32(row,o).ToString()));
                 }
                 return String.Join("|",adapters)+"#"+String.Join("|",rows.OrderBy(s=>s));
             } finally { Marshal.FreeHGlobal(table); }

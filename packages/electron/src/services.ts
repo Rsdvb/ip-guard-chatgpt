@@ -1,9 +1,7 @@
 import { z } from "zod";
 
-export const serviceSchema = z.enum(["claude", "chatgpt", "both"]);
-export const singleServiceSchema = serviceSchema.exclude(["both"]);
+export const serviceSchema = z.enum(["claude", "chatgpt"]);
 export type Service = z.infer<typeof serviceSchema>;
-export type SingleService = Exclude<Service, "both">;
 export const services = {
   claude: { name: "Claude", endpoint: "https://claude.ai/cdn-cgi/trace", domains: ["claude.ai"] },
   chatgpt: {
@@ -12,19 +10,12 @@ export const services = {
     domains: ["chatgpt.com", "chat.openai.com"],
   },
 } as const;
-export const selectedServices = (service: Service): SingleService[] =>
-  service === "both" ? ["claude", "chatgpt"] : [service];
-export const serviceName = (service: Service) =>
-  selectedServices(service)
-    .map((key) => services[key].name)
-    .join(" + ");
-export const serviceSource = (service: Service) =>
-  selectedServices(service)
-    .map((key) => services[key].endpoint)
-    .join(" + ");
-export const serviceDomains = (service: Service) =>
-  selectedServices(service).flatMap((key) => [...services[key].domains]);
-export const protectedService = (value: string): SingleService | undefined => {
+export const serviceKeys = ["claude", "chatgpt"] as const;
+export const serviceName = (service: Service) => services[service].name;
+export const serviceSource = (service: Service) => services[service].endpoint;
+export const serviceDomains = (service: Service) => [...services[service].domains];
+export const allServiceDomains = () => serviceKeys.flatMap(serviceDomains);
+export const protectedService = (value: string): Service | undefined => {
   try {
     const url = new URL(value);
     if (!["https:", "http:"].includes(url.protocol)) return;
