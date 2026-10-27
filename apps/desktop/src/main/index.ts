@@ -46,7 +46,10 @@ const chatgpt = new ExitIPv4("chatgpt");
 const probe = new ProtectionProbe({ claude, chatgpt });
 const guardian = new Guardian(probe);
 const browserBridge = new BrowserBridge(guardian);
-const coffee = new CoffeeDiagnostics(claude);
+const coffee = {
+  claude: new CoffeeDiagnostics("claude", claude),
+  chatgpt: new CoffeeDiagnostics("chatgpt", chatgpt),
+};
 const protectionAlerts = new ProtectionAlerts(guardian, () => {
   const [win] = BrowserWindow.getAllWindows();
   if (win) {
@@ -80,7 +83,7 @@ const open = () =>
 const start = () => {
   setupIpc(devOrigin, guardian, coffee, probe, updates, browserBridge);
   guardian.start();
-  coffee.start();
+  for (const diagnostics of Object.values(coffee)) diagnostics.start();
   updates.start();
 
   if (devOrigin === null) {
@@ -164,7 +167,7 @@ if (app.requestSingleInstanceLock()) {
     quitting = true;
     protectionAlerts.stop();
     browserBridge.close();
-    coffee.stop();
+    for (const diagnostics of Object.values(coffee)) diagnostics.stop();
     void guardian.stop().finally(() => {
       claude.stop();
       chatgpt.stop();

@@ -1,15 +1,16 @@
 import { CircleX, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { CoffeeMetric, CoffeeReport } from "@ip-guard/electron";
-import { formatIPText, ipv4Schema, ipv6Schema } from "@ip-guard/electron";
+import type { SingleService, CoffeeMetric, CoffeeReport } from "@ip-guard/electron";
+import { services, formatIPText, ipv4Schema, ipv6Schema } from "@ip-guard/electron";
 
 const initial: CoffeeReport = {
+  service: "claude",
   phase: "idle",
   checkedAt: "",
   error: "",
-  claudeIp: "",
-  claudeTimezone: "",
+  serviceIp: "",
+  serviceTimezone: "",
   groups: [],
 };
 const field = (
@@ -159,10 +160,11 @@ function udpProbe(signal: AbortSignal): Promise<UdpResult> {
   });
 }
 type HistoryEntry = { ip: string; time: string };
-const historyKey = "ipguard.coffee.history";
-function loadHistory(): HistoryEntry[] {
+const historyKey = (service: SingleService) =>
+  service === "claude" ? "ipguard.coffee.history" : "ipguard.coffee.history.chatgpt";
+function loadHistory(service: SingleService): HistoryEntry[] {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(historyKey) ?? "[]");
+    const value: unknown = JSON.parse(localStorage.getItem(historyKey(service)) ?? "[]");
     if (!Array.isArray(value)) return [];
     return value
       .flatMap((item: unknown) => {
@@ -199,22 +201,29 @@ function MetricRows({ items, ipsVisible }: { items: CoffeeMetric[]; ipsVisible: 
   );
 }
 
-export function CoffeePage({ ipsVisible }: { ipsVisible: boolean }) {
+export function CoffeePage({
+  service,
+  ipsVisible,
+}: {
+  service: SingleService;
+  ipsVisible: boolean;
+}) {
   const bridge = window.desktop;
-  const [report, setReport] = useState(initial);
+  const name = services[service].name;
+  const [report, setReport] = useState<CoffeeReport>({ ...initial, service });
   const [error, setError] = useState("");
   const [generation, setGeneration] = useState(0);
   const [device, setDevice] = useState<CoffeeMetric[]>([]);
   const [udp, setUdp] = useState<UdpResult>({ phase: "running", ips: [], detail: "" });
-  const [history, setHistory] = useState(loadHistory);
+  const [history, setHistory] = useState(() => loadHistory(service));
   useEffect(() => {
     if (!bridge) return;
     let alive = true;
     const unsubscribe = bridge.subscribeCoffee((value) => {
-      if (alive) setReport(value);
+      if (alive && value.service === service) setReport(value);
     });
     void bridge
-      .invoke({ action: "coffee:status" })
+      .invoke({ action: "coffee:status", service })
       .then((reply) => {
         if (alive && reply.diagnostics) setReport(reply.diagnostics);
       })
@@ -225,7 +234,7 @@ export function CoffeePage({ ipsVisible }: { ipsVisible: boolean }) {
       alive = false;
       unsubscribe();
     };
-  }, [bridge]);
+  }, [bridge, service]);
   useEffect(() => {
     setDevice(deviceMetrics());
     if (!bridge) {
@@ -244,24 +253,24 @@ export function CoffeePage({ ipsVisible }: { ipsVisible: boolean }) {
     };
   }, [bridge, generation]);
   useEffect(() => {
-    if (report.phase !== "complete" || !report.claudeIp) return;
-    const previous = loadHistory();
+    if (report.phase !== "complete" || !report.serviceIp) return;
+    const previous = loadHistory(service);
     const last = previous[0];
-    if (last?.ip === report.claudeIp && Date.now() - Date.parse(last.time) < 86400000) return;
-    const entries = [{ ip: report.claudeIp, time: report.checkedAt }, ...previous].slice(0, 6);
+    if (last?.ip === report.serviceIp && Date.now() - Date.parse(last.time) < 86400000) return;
+    const entries = [{ ip: report.serviceIp, time: report.checkedAt }, ...previous].slice(0, 6);
     try {
-      localStorage.setItem(historyKey, JSON.stringify(entries));
+      localStorage.setItem(historyKey(service), JSON.stringify(entries));
       setHistory(entries);
     } catch {
       setError("IP 历史保存失败");
     }
-  }, [report.checkedAt, report.claudeIp, report.phase]);
+  }, [report.checkedAt, report.serviceIp, report.phase, service]);
   const refresh = async () => {
     if (!bridge) return;
     setError("");
     setGeneration((value) => value + 1);
     try {
-      const reply = await bridge.invoke({ action: "coffee:refresh" });
+      const reply = await bridge.invoke({ action: "coffee:refresh", service });
       if (reply.diagnostics) setReport(reply.diagnostics);
     } catch (err) {
       setError(err instanceof Error ? err.message : "刷新失败");
@@ -269,8 +278,8 @@ export function CoffeePage({ ipsVisible }: { ipsVisible: boolean }) {
   };
   const localZone = device.find((item) => item.id === "timezone")?.value ?? "";
   const localOffset = localZone ? offset(localZone) : null;
-  const remoteOffset = report.claudeTimezone ? offset(report.claudeTimezone) : null;
-  const timezoneDetail = `${localZone} ${offsetLabel(localOffset)} / ${report.claudeTimezone || "出口时区未知"} ${offsetLabel(remoteOffset)}`;
+  const remoteOffset = report.serviceTimezone ? offset(report.serviceTimezone) : null;
+  const timezoneDetail = `${localZone} ${offsetLabel(localOffset)} / ${report.serviceTimezone || "出口时区未知"} ${offsetLabel(remoteOffset)}`;
   const mainlandTimezone = localZone === "Asia/Shanghai" || localZone === "Asia/Urumqi";
   const timezoneMatch =
     localOffset != null && remoteOffset != null && Math.abs(localOffset - remoteOffset) <= 60;
@@ -287,7 +296,7 @@ export function CoffeePage({ ipsVisible }: { ipsVisible: boolean }) {
       : field("timezone-check", "时区对照", "等待 IP 时区", "unknown");
   const publicUdp = udp.ips.filter(publicIPv4);
   const udp6 = udp.ips.filter((ip) => ipv6Schema.safeParse(ip).success);
-  const udpDiffers = Boolean(report.claudeIp && publicUdp.some((ip) => ip !== report.claudeIp));
+  const udpDiffers = Boolean(report.serviceIp && publicUdp.some((ip) => ip !== report.serviceIp));
   const udpItems: CoffeeMetric[] =
     udp.phase === "running"
       ? [field("status", "状态", "检测中…", "unknown")]
@@ -300,18 +309,18 @@ export function CoffeePage({ ipsVisible }: { ipsVisible: boolean }) {
                 ? "可能泄露"
                 : udp6.length
                   ? "检测到 UDP IPv6 出口"
-                  : report.claudeIp
+                  : report.serviceIp
                     ? "未检测到泄露"
-                    : "等待 Claude 出口对照",
-              udpDiffers || udp6.length ? "warning" : report.claudeIp ? "ok" : "unknown",
+                    : `等待 ${name} 出口对照`,
+              udpDiffers || udp6.length ? "warning" : report.serviceIp ? "ok" : "unknown",
             ),
             ...publicUdp.map((ip, index) =>
               field(
                 `udp-${index}`,
                 "UDP IPv4",
                 ip,
-                report.claudeIp ? (ip === report.claudeIp ? "ok" : "warning") : "unknown",
-                report.claudeIp && ip !== report.claudeIp ? "与 Claude IPv4 出口不同" : "",
+                report.serviceIp ? (ip === report.serviceIp ? "ok" : "warning") : "unknown",
+                report.serviceIp && ip !== report.serviceIp ? `与 ${name} IPv4 出口不同` : "",
               ),
             ),
             ...udp6.map((ip, index) =>
@@ -418,14 +427,14 @@ export function CoffeePage({ ipsVisible }: { ipsVisible: boolean }) {
         </section>
         <section className="panel coffee-history">
           <div className="panel-heading">
-            <h2>Claude 出口历史</h2>
+            <h2>{name} 出口历史</h2>
             <button
               className="text-btn"
               type="button"
               disabled={!history.length}
               onClick={() => {
                 try {
-                  localStorage.removeItem(historyKey);
+                  localStorage.removeItem(historyKey(service));
                   setHistory([]);
                 } catch {
                   setError("清除历史失败");

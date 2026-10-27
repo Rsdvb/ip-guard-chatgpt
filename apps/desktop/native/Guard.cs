@@ -159,6 +159,14 @@ namespace IpGuard {
                     Data.Save(new Config { settings=s, apps=config.apps, autostart=config.autostart, rulesLocked=true, networkAdapterId=config.networkAdapterId, networkAdapterName=config.networkAdapterName });
                     lock(state) { config.settings = s; config.rulesLocked = true; healthy = false; currentIp = ""; reason = "正在校验锁定的公网 IPv4"; }
                     Log("info", "允许的公网 IPv4 已锁定"); Check();
+                } else if(action == "service:set") {
+                    string service=input["service"] as string; Data.ValidateService(service);
+                    if(service==config.settings.service) return Snapshot();
+                    Settings next=new Settings { service=service, expectedIp="", intervalSeconds=config.settings.intervalSeconds };
+                    Data.Save(new Config { settings=next, apps=config.apps, autostart=config.autostart, rulesLocked=false, networkAdapterId=config.networkAdapterId, networkAdapterName=config.networkAdapterName });
+                    lock(state) { config.settings=next; config.rulesLocked=false; healthy=false; currentIp=""; }
+                    Trip("防护服务已切换，受保护程序已停止，请重新获取并锁定地址"); BlockPending();
+                    Log("info","防护服务已切换 · "+service+" · 旧地址已清除");
                 } else if(action == "unlock") {
                     if(!config.rulesLocked) return Snapshot();
                     Data.Save(new Config { settings=config.settings, apps=config.apps, autostart=config.autostart, rulesLocked=false, networkAdapterId=config.networkAdapterId, networkAdapterName=config.networkAdapterName });

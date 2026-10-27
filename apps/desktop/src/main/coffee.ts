@@ -6,7 +6,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { z } from "zod";
 
-import type { CoffeeMetric, CoffeeReport } from "@ip-guard/electron";
+import { services } from "@ip-guard/electron";
+import type { SingleService, CoffeeMetric, CoffeeReport } from "@ip-guard/electron";
 
 import type { ExitIPv4 } from "#src/main/exit-ip.ts";
 import type { ExitResult } from "#src/main/exit-policy.ts";
@@ -71,43 +72,60 @@ const message = (error: unknown) =>
   error instanceof Error ? error.message.slice(0, 200) : "请求失败";
 
 export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> {
-  private readonly claude: ExitIPv4;
+  private readonly probe: ExitIPv4;
+  private readonly service: SingleService;
+  private get name() {
+    return services[this.service].name;
+  }
+  private get supportLabel() {
+    return this.service === "claude" ? "Claude 支持地区" : "出口国家/地区";
+  }
+  private get statusLabel() {
+    return this.service === "claude" ? "Claude 服务状态" : "OpenAI 整体状态";
+  }
+  private get auxiliary() {
+    return this.service === "claude"
+      ? { host: "anthropic.com", url: "https://www.anthropic.com/cdn-cgi/trace" }
+      : { host: "status.openai.com", url: "https://status.openai.com/" };
+  }
   private refreshAfterRun = false;
   private collectingIp = "";
-  constructor(claude: ExitIPv4) {
+  constructor(service: SingleService, probe: ExitIPv4) {
     super();
-    this.claude = claude;
-    claude.on("update", (result) => this.applyClaude(result));
+    this.probe = probe;
+    this.service = service;
+    this.report.service = service;
+    probe.on("update", (result) => this.applyExit(result));
   }
-  private applyClaude(result: ExitResult) {
-    const changed = this.report.claudeIp !== result.ip;
-    this.report.claudeIp = result.ip;
+  private applyExit(result: ExitResult) {
+    const changed = this.report.serviceIp !== result.ip;
+    this.report.serviceIp = result.ip;
     const exits = this.report.groups.find((group) => group.id === "exits");
     if (!exits) return;
     this.item(
       "exits",
       metric(
-        "claude",
-        "Claude AI 出口",
+        this.service,
+        `${this.name} 出口`,
         result.ip || "获取失败",
         result.ip ? "neutral" : "error",
         result.error ||
           `IPv4 · ${new Date(result.checkedAt).toLocaleTimeString("zh-CN", { hour12: false })}`,
       ),
     );
-    this.setAvailability("claude", {
-      label: "claude.ai",
+    this.setAvailability(this.service, {
+      label: new URL(services[this.service].endpoint).hostname,
       status: result.status,
       ms: result.ms,
       ...(result.error ? { error: result.error } : {}),
     });
     if (changed) {
       this.country = "";
-      this.report.claudeTimezone = "";
+      this.report.serviceTimezone = "";
       for (const group of this.report.groups)
         if (["trust", "security", "location", "dns"].includes(group.id))
           group.items = group.items.map((item) =>
-            unknown(item.id, item.label, "等待 Claude 出口重新检测"),
+            unknown(item.id, item.label, `等待 ${this.name} 出口重新检测`),
           );
       if (this.report.phase === "complete") this.refresh();
       else if (
@@ -120,11 +138,12 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
     this.publish();
   }
   report: CoffeeReport = {
+    service: "claude",
     phase: "idle",
     checkedAt: "",
     error: "",
-    claudeIp: "",
-    claudeTimezone: "",
+    serviceIp: "",
+    serviceTimezone: "",
     groups: [],
   };
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -207,11 +226,12 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
     if (this.report.phase === "running" || this.stopped) return this.report;
     this.collectingIp = "";
     this.report = {
+      service: this.service,
       phase: "running",
       checkedAt: "",
       error: "",
-      claudeIp: this.claude.latest?.ip ?? "",
-      claudeTimezone: "",
+      serviceIp: this.probe.latest?.ip ?? "",
+      serviceTimezone: "",
       groups: [],
     };
     this.country = "";
@@ -219,16 +239,16 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
     this.group("exits", "出口 IP", [
       unknown("cn", "国内出口"),
       unknown("cf", "Cloudflare 出口"),
-      unknown("claude", "Claude AI 出口"),
+      unknown(this.service, `${this.name} 出口`),
     ]);
     this.group("ipv6", "IPv6 检测", [
       unknown("public", "公网 IPv6", "等待 IPv6 请求"),
       unknown("cf", "Cloudflare IPv6"),
-      unknown("claude", "Claude IPv6"),
+      unknown(this.service, `${this.name} IPv6`),
     ]);
     this.group("trust", "信任与地区", [
       unknown("score", "信任分"),
-      unknown("support", "Claude 支持地区"),
+      unknown("support", this.supportLabel),
     ]);
     this.group("location", "IP 属性", [
       unknown("country", "地区"),
@@ -246,9 +266,9 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
       unknown("abuse", "滥用记录"),
     ]);
     this.group("availability", "网络连通", [
-      unknown("claude", "claude.ai"),
-      unknown("anthropic", "anthropic.com"),
-      unknown("service", "Claude 服务状态"),
+      unknown(this.service, new URL(services[this.service].endpoint).hostname),
+      unknown("auxiliary", this.auxiliary.host),
+      unknown("service", this.statusLabel),
     ]);
     this.group("dns", "DNS 出口", [unknown("status", "状态")]);
     void this.collect()
@@ -286,7 +306,7 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
   ) {
     this.availability.set(id, sample);
     const detail = sample.error ?? `HTTP ${sample.status} · ${sample.ms} ms`;
-    if (restricted.has(this.country)) {
+    if (this.service === "claude" && restricted.has(this.country)) {
       this.item("availability", metric(id, sample.label, "站点提示受限", "error", detail));
       return;
     }
@@ -331,16 +351,18 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
   }
   private async serviceStatus() {
     try {
-      const data = z
-        .object({
-          overall_indicator: z
-            .enum(["none", "minor", "major", "critical", "maintenance"])
-            .optional(),
-        })
-        .parse(await this.json(`${base}/claude/status.json`));
-      const indicator = data.overall_indicator;
+      const status = z.enum(["none", "minor", "major", "critical", "maintenance"]).optional();
+      const data = await this.json(
+        this.service === "claude"
+          ? `${base}/claude/status.json`
+          : "https://status.openai.com/api/v2/status.json",
+      );
+      const indicator =
+        this.service === "claude"
+          ? z.object({ overall_indicator: status }).parse(data).overall_indicator
+          : z.object({ status: z.object({ indicator: status }) }).parse(data).status.indicator;
       if (!indicator) {
-        this.item("availability", unknown("service", "Claude 服务状态"));
+        this.item("availability", unknown("service", this.statusLabel));
         return;
       }
       const labels = {
@@ -354,17 +376,20 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
         "availability",
         metric(
           "service",
-          "Claude 服务状态",
+          this.statusLabel,
           labels[indicator],
           indicator === "none"
             ? "ok"
             : indicator === "minor" || indicator === "maintenance"
               ? "warning"
               : "error",
+          this.service === "chatgpt"
+            ? "status.openai.com · 聚合服务状态，不代表单个账号可用性"
+            : "NET.COFFEE",
         ),
       );
     } catch (error) {
-      this.item("availability", unknown("service", "Claude 服务状态", message(error)));
+      this.item("availability", unknown("service", this.statusLabel, message(error)));
     }
   }
   private async cn() {
@@ -388,7 +413,7 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
     if (!ip) return;
     try {
       const geo = geoSchema.parse(await this.json(`${base}/api/geoip/${encodeURIComponent(ip)}`));
-      if (id === "claude" && this.report.claudeIp !== ip) return;
+      if (id === this.service && this.report.serviceIp !== ip) return;
       const group = this.report.groups.find((group) => group.id === "exits");
       const item = group?.items.find((item) => item.id === id);
       if (item)
@@ -397,7 +422,7 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
           detail: [geo.country, geo.region, geo.city, geo.isp].filter(Boolean).join(" · "),
         });
     } catch (error) {
-      if (id === "claude" && this.report.claudeIp !== ip) return;
+      if (id === this.service && this.report.serviceIp !== ip) return;
       const item = this.report.groups
         .find((group) => group.id === "exits")
         ?.items.find((item) => item.id === id);
@@ -407,8 +432,8 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
   private async risk(ip: string) {
     if (!ip) {
       this.group("trust", "信任与地区", [
-        unknown("score", "信任分", "Claude 出口获取失败"),
-        unknown("support", "Claude 支持地区"),
+        unknown("score", "信任分", `${this.name} 出口获取失败`),
+        unknown("support", this.supportLabel),
       ]);
       return;
     }
@@ -416,10 +441,10 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
       const data = riskSchema.parse(
         await this.json(`${base}/api/iprisk/${encodeURIComponent(ip)}`),
       );
-      if (this.report.claudeIp !== ip) return;
+      if (this.report.serviceIp !== ip) return;
       this.country = (data.countryCode ?? "").toUpperCase();
-      this.report.claudeTimezone = data.timezone ?? "";
-      const blockedRegion = restricted.has(this.country);
+      this.report.serviceTimezone = data.timezone ?? "";
+      const blockedRegion = this.service === "claude" && restricted.has(this.country);
       const score = blockedRegion ? 0 : data.trust_score;
       const grade =
         score == null
@@ -445,12 +470,16 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
         this.country
           ? metric(
               "support",
-              "Claude 支持地区",
-              blockedRegion ? "站点提示受限" : "站点提示支持",
-              blockedRegion ? "error" : "ok",
+              this.supportLabel,
+              this.service === "chatgpt"
+                ? this.country
+                : blockedRegion
+                  ? "站点提示受限"
+                  : "站点提示支持",
+              this.service === "chatgpt" ? "info" : blockedRegion ? "error" : "ok",
               this.country,
             )
-          : unknown("support", "Claude 支持地区"),
+          : unknown("support", this.supportLabel),
       ]);
       const residential =
         data.isResidential ?? (data.is_datacenter == null ? undefined : !data.is_datacenter);
@@ -486,11 +515,11 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
       ]);
       for (const [id, sample] of this.availability) this.setAvailability(id, sample);
     } catch (error) {
-      if (this.report.claudeIp !== ip) return;
+      if (this.report.serviceIp !== ip) return;
       const detail = message(error);
       this.group("trust", "信任与地区", [
         unknown("score", "信任分", detail),
-        unknown("support", "Claude 支持地区", detail),
+        unknown("support", this.supportLabel, detail),
       ]);
       this.group("location", "IP 属性", [unknown("result", "属性查询", detail)]);
       this.group("security", "安全属性", [unknown("result", "安全查询", detail)]);
@@ -531,7 +560,7 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
               "DNS 出口",
               ip,
               differs ? "warning" : known ? "ok" : "unknown",
-              [geo.country, geo.isp, differs ? "中国 DNS 与非中国 Claude 出口组合" : ""]
+              [geo.country, geo.isp, differs ? `中国 DNS 与非中国 ${this.name} 出口组合` : ""]
                 .filter(Boolean)
                 .join(" · "),
             );
@@ -559,21 +588,25 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
     }
   }
   private async collect() {
-    const claude = this.claude.check().then((result) => {
+    const serviceExit = this.probe.check().then((result) => {
       this.collectingIp = result.ip;
-      this.applyClaude(result);
+      this.applyExit(result);
       return result.ip;
     });
     const cf = this.trace("cf", "https://1.1.1.1/cdn-cgi/trace");
     const cn = this.cn();
-    const risk = claude.then((ip) => this.risk(ip));
+    const risk = serviceExit.then((ip) => this.risk(ip));
     const availability = (async () => {
       try {
-        const r = await this.read("https://www.anthropic.com/cdn-cgi/trace");
-        this.setAvailability("anthropic", { label: "anthropic.com", status: r.status, ms: r.ms });
+        const r = await this.read(this.auxiliary.url);
+        this.setAvailability("auxiliary", {
+          label: this.auxiliary.host,
+          status: r.status,
+          ms: r.ms,
+        });
       } catch (error) {
-        this.setAvailability("anthropic", {
-          label: "anthropic.com",
+        this.setAvailability("auxiliary", {
+          label: this.auxiliary.host,
           status: 0,
           ms: 0,
           error: message(error),
@@ -584,13 +617,13 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
       risk,
       cf.then((ip) => this.geo("cf", ip)),
       cn.then((ip) => this.geo("cn", ip)),
-      claude.then((ip) => this.geo("claude", ip)),
+      serviceExit.then((ip) => this.geo(this.service, ip)),
       availability,
       this.dns(risk),
       this.serviceStatus(),
       this.ipv6Probe("public", "公网 IPv6", "https://api6.ipify.org"),
       this.ipv6Probe("cf", "Cloudflare IPv6", "https://one.one.one.one/cdn-cgi/trace", true),
-      this.ipv6Probe("claude", "Claude IPv6", "https://claude.ai/cdn-cgi/trace", true),
+      this.ipv6Probe(this.service, `${this.name} IPv6`, services[this.service].endpoint, true),
     ]);
   }
 }

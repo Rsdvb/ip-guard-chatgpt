@@ -90,11 +90,12 @@ const initial: Snapshot = {
   apps: [],
   logs: [],
 };
-type Page = "overview" | "apps" | "coffee" | "settings" | "logs";
+type Page = "overview" | "apps" | "coffee" | "chatgpt" | "settings" | "logs";
 const nav: { id: Page; label: string; icon: typeof Shield }[] = [
   { id: "overview", label: "防护总览", icon: LayoutDashboard },
   { id: "apps", label: "受保护程序", icon: ShieldCheck },
   { id: "coffee", label: "Claude 检测", icon: ScanLine },
+  { id: "chatgpt", label: "ChatGPT 检测", icon: ScanLine },
   { id: "settings", label: "防护设置", icon: Settings2 },
   { id: "logs", label: "事件日志", icon: FileClock },
 ];
@@ -171,6 +172,7 @@ function RuleForm({
   available,
   onLock,
   onUnlock,
+  onServiceChange,
   onFetch,
 }: {
   ipsVisible: boolean;
@@ -180,6 +182,7 @@ function RuleForm({
   available: boolean;
   onLock: (settings: Settings) => Promise<void>;
   onUnlock: () => Promise<void>;
+  onServiceChange: (service: Service) => Promise<boolean>;
   onFetch?: (service: Service) => Promise<string>;
 }) {
   const [draft, setDraft] = useState(settings);
@@ -220,17 +223,20 @@ function RuleForm({
         <select
           id="protection-service"
           value={draft.service}
-          disabled={locked || busy || fetching || !available}
-          onChange={(event) =>
-            setDraft({ ...draft, service: serviceSchema.parse(event.target.value), expectedIp: "" })
-          }
+          disabled={busy || fetching || !available}
+          onChange={(event) => {
+            const service = serviceSchema.parse(event.target.value);
+            void onServiceChange(service);
+          }}
         >
           <option value="claude">Claude</option>
           <option value="chatgpt">ChatGPT</option>
           <option value="both">Claude + ChatGPT（两边出口须相同）</option>
         </select>
         <span className="muted">
-          程序列表共用此规则；未选服务的网页不受保护。更换服务需先取消锁定。
+          {locked
+            ? "切换服务需确认停止程序并清除旧地址，然后重新获取和锁定。"
+            : "程序列表共用此规则；选择服务后获取并锁定对应地址。"}
         </span>
       </div>
       <div className="form-row">
@@ -331,6 +337,7 @@ function AddDialog({
   const [args, setArgs] = useState("");
   const [presets, setPresets] = useState<AppPreset[]>([]);
   const [finding, setFinding] = useState(true);
+  const [presetRevision, setPresetRevision] = useState(0);
   const [presetError, setPresetError] = useState("");
   const [selected, setSelected] = useState("");
   const alreadyAdded = (value: string) =>
@@ -341,7 +348,9 @@ function AddDialog({
     );
   const duplicate = alreadyAdded(path);
   useEffect(() => {
-    ref.current?.showModal();
+    if (!ref.current?.open) ref.current?.showModal();
+    setFinding(true);
+    setPresetError("");
     let alive = true;
     if (!window.desktop) {
       setFinding(false);
@@ -361,7 +370,7 @@ function AddDialog({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [presetRevision]);
   const pick = async () => {
     const selected = await onPick();
     if (selected) {
@@ -393,6 +402,15 @@ function AddDialog({
       >
         <header>
           <h2>添加程序</h2>
+          <button
+            type="button"
+            className="btn"
+            disabled={finding || busy || !window.desktop}
+            onClick={() => setPresetRevision((value) => value + 1)}
+          >
+            <RefreshCw size={14} />
+            重新检测
+          </button>
           <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
             <X size={18} />
           </button>
@@ -538,7 +556,7 @@ export function GuardApp() {
     };
     const unsubscribe = bridge.subscribeCoffee(update);
     void bridge
-      .invoke({ action: "coffee:status" })
+      .invoke({ action: "coffee:status", service: "claude" })
       .then((reply) => {
         if (reply.diagnostics) update(reply.diagnostics);
       })
@@ -627,6 +645,12 @@ export function GuardApp() {
   const unlock = async () => {
     const result = await invoke({ action: "unlock" });
     if (result?.snapshot && !result.cancelled) toast.success("已取消锁定，受保护程序已停止");
+  };
+  const changeService = async (service: Service) => {
+    const result = await invoke({ action: "service:set", service });
+    if (!result?.snapshot || result.cancelled) return false;
+    toast.success(`已切换为 ${serviceName(service)}，请重新获取并锁定地址`);
+    return true;
   };
   const fetchIPv4 = bridge
     ? async (service: Service) => {
@@ -903,7 +927,13 @@ export function GuardApp() {
             </div>
           )}
           <div key={page} className="page-content">
-            {page === "coffee" && <CoffeePage ipsVisible={ipsVisible} />}
+            {(page === "coffee" || page === "chatgpt") && (
+              <CoffeePage
+                key={page}
+                service={page === "chatgpt" ? "chatgpt" : "claude"}
+                ipsVisible={ipsVisible}
+              />
+            )}
             {page === "overview" && (
               <>
                 <section className={`network-panel ${snapshot.ready ? "matched" : ""}`}>
@@ -1010,6 +1040,7 @@ export function GuardApp() {
                       available={available}
                       onLock={lock}
                       onUnlock={unlock}
+                      onServiceChange={changeService}
                       onFetch={fetchIPv4}
                     />
                   </section>
@@ -1061,6 +1092,7 @@ export function GuardApp() {
                     available={available}
                     onLock={lock}
                     onUnlock={unlock}
+                    onServiceChange={changeService}
                     onFetch={fetchIPv4}
                   />
                 </section>

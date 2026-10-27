@@ -1,8 +1,9 @@
 Original project: https://github.com/chxcodepro/ip-guard
 Original base: e6a9a499beb827f6b2ff186351abc2ee5bcb68ca (0.9.3)
 This private repository: https://github.com/Rsdvb/ip-guard-chatgpt
-Snapshot: 0.10.0 Windows modification adding Claude / ChatGPT service selection,
-ChatGPT Desktop discovery and browser protection. See CHANGELOG.zh.md.
+Snapshot: 0.10.1 Windows modification adding Claude / ChatGPT service selection,
+independent diagnostics, ChatGPT Desktop discovery, browser protection and
+default administrator startup. See CHANGELOG.zh.md.
 
 The upstream workflow was retained as ci-templates/release.yml instead of an
 active .github/workflows file. It is not enabled, and releases uploaded here

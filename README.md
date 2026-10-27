@@ -4,9 +4,9 @@
 
 面向 Windows 的公网 IPv4 防护工具。选择 Claude、ChatGPT 或同时保护，锁定允许的服务出口 IPv4，在应用启动前校验，运行期间持续监测；地址异常时结束受保护进程树。配套 Chrome / Edge 扩展保护相应服务的网页。
 
-本仓库为 **0.10.0 Windows 修改版**，新增 ChatGPT 支持。基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`。安装包见本仓库 Releases；随附的本地构建未绑定自动更新源。
+本仓库为 **0.10.1 Windows 修改版**，支持 Claude / ChatGPT 防护、独立诊断、ChatGPT 安装识别与默认管理员启动。基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`。安装包见本仓库 Releases；随附的本地构建未绑定自动更新源。
 
-验证情况：26 项单元测试、3 项浏览器端到端测试和原生配置/消息测试通过。真实 ChatGPT Desktop 的启动接管、网络切换阻断和安装/卸载恢复仍需实测。安装包未签名；本次不含 Mac 移植。
+验证情况：30 项单元测试、4 项浏览器端到端测试和原生配置/消息测试通过。新版发现脚本已只读识别到实际 `OpenAI.Codex` 包中的 ChatGPT 主程序。真实 ChatGPT Desktop 的启动接管、网络切换阻断和安装/卸载恢复仍需实测。安装包未签名；本次不含 Mac 移植。
 
 为避免上传时申请额外的 Actions 工作流写入权限，原工作流保留在 `ci-templates/release.yml`，默认不启用。本仓库使用新的源码快照提交，原始历史可在上述上游提交查看。
 
@@ -47,7 +47,7 @@
 
 ## 快速开始
 
-1. 安装并打开 IP Guard；若显示普通权限，点击「以管理员身份重启」。
+1. 安装并打开 IP Guard；Windows 会默认请求管理员权限，请确认 UAC 提示。开发模式需从管理员终端运行。
 2. 选择「防护服务」（Claude / ChatGPT / 同时保护），在「允许的公网 IPv4」旁点击「获取当前 IPv4」，核对地址后点击「锁定」。获取按钮只填入草稿，锁定后才应用规则。切换服务会清空地址草稿，需要重新获取和锁定。
 3. 关闭目标程序，在「受保护程序」中选择 Claude 预设或浏览 EXE，添加后开启防护开关。
 4. 从 IP Guard、原快捷方式或原终端命令启动程序。
@@ -65,12 +65,12 @@
 
 ### 程序预设与参数
 
-| 预设                | 识别方式                                                                                                                |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Claude Code（npm）  | 当前 npm 全局目录中 `@anthropic-ai/claude-code` 包的原生 EXE                                                            |
-| Claude Code（原生） | [官方原生安装](https://code.claude.com/docs/en/setup)路径 `%USERPROFILE%/.local/bin/claude.exe`，以及 PATH 中的独立 EXE |
-| Claude Desktop      | 已注册 MSIX 主应用，或传统安装的卸载注册信息                                                                            |
-| ChatGPT Desktop     | 当前用户已注册的 `OpenAI.*ChatGPT*` MSIX 包中的 `ChatGPT.exe` 主入口；未找到时可手动选择 EXE                            |
+| 预设                | 识别方式                                                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude Code（npm）  | 当前 npm 全局目录中 `@anthropic-ai/claude-code` 包的原生 EXE                                                                                           |
+| Claude Code（原生） | [官方原生安装](https://code.claude.com/docs/en/setup)路径 `%USERPROFILE%/.local/bin/claude.exe`，以及 PATH 中的独立 EXE                                |
+| Claude Desktop      | 已注册 MSIX 主应用，或传统安装的卸载注册信息                                                                                                           |
+| ChatGPT Desktop     | 当前用户已注册的 `OpenAI.*` MSIX 包中的 `ChatGPT.exe` 主入口，包含包名为 `OpenAI.Codex` 的 ChatGPT；不选择命令运行器。未找到时可重新检测或手动选择 EXE |
 
 每次打开添加窗口都会重新定位。已添加路径显示「已添加」；未找到或定位失败时，可手动浏览。预设只填表，防护由用户手动开启。
 
@@ -87,10 +87,10 @@ Claude / ChatGPT Desktop 更新后可能更换 MSIX 版本目录。更新前解�
 允许地址取自所选服务对应的出口探针：Claude 使用 `https://claude.ai/cdn-cgi/trace`，ChatGPT 使用 `https://chatgpt.com/cdn-cgi/trace`。获取按钮、启动校验、后台轮询和检测卡片使用相同选择，检测网络栈沿用系统代理。
 
 - 「同时保护」会并行检测两个服务；仅当两个探针都返回相同的有效公网 IPv4，且等于锁定地址时，才放行。分流出口不同、任一超时、非 200 响应、无效 IPv4 或检测失败均保持阻断。可统一分流或选择只保护一个服务。
-- 服务选择与 IP 一同锁定；修改前需要取消锁定，取消会停止受保护程序。所有已启用的程序共用当前服务规则，添加 ChatGPT 程序时请确认选择了 ChatGPT 或同时保护。
+- 锁定后也可在下拉框选择其他服务。确认后会停止受保护程序、封锁连接、清除旧地址并取消锁定；随后重新获取和锁定新服务地址。取消确认则保留原配置。所有已启用的程序共用当前服务规则，添加 ChatGPT 程序时请确认选择了 ChatGPT 或同时保护。
 - 未选中的服务网页保持普通访问，不属于本次防护。连接建立前或消息不兼容时，扩展默认阻断两个服务；连接正常后按选择应用规则。
 - 旧配置缺少服务字段时继续按 Claude 模式读取；新配置默认同时保护。扩展与桌面程序需一起更新，旧版消息不会被用于授权 ChatGPT。
-- ChatGPT trace 是网站端点，不是稳定性有保证的官方 API；不可用时保持阻断。「Claude 检测」页的第三方诊断仍仅针对 Claude，ChatGPT 的防护判定见总览和事件日志。
+- ChatGPT trace 是网站端点，不是稳定性有保证的官方 API；不可用时保持阻断。Claude / ChatGPT 各有独立检测页，按各自出口显示诊断与历史；诊断不改变锁定规则。
 
 | 状态                     | 处理方式                                 |
 | ------------------------ | ---------------------------------------- |
@@ -122,7 +122,7 @@ Claude / ChatGPT Desktop 更新后可能更换 MSIX 版本目录。更新前解�
 
 ## 网络诊断
 
-「Claude 检测」接入 [Net.Coffee](https://ip.net.coffee/claude/) 的公开检测端点，提供国内、Cloudflare、Claude 出口以及地区、ASN、运营商、信任分、安全属性、连通性和 DNS 信息。
+「Claude 检测」与「ChatGPT 检测」分别使用各自服务出口，并接入 [Net.Coffee](https://ip.net.coffee/claude/) 的公开 IP 属性、信任分、安全属性与 DNS 检测端点。两个服务的报告、时区对照、UDP 对照和出口历史独立保存，不能用 Claude 的诊断结果代表 ChatGPT。ChatGPT 的“OpenAI 整体状态”来自 [OpenAI Status](https://status.openai.com/)，属于聚合服务状态，不代表单个账号可用性；第三方地区识别不作为 ChatGPT 支持地区判定。
 
 - Claude AI 出口随守护轮询更新；其余诊断后台每 5 分钟刷新，也可手动刷新。出口变化后重新检测关联属性。
 - IPv6 使用独立地址族请求检测公网、Cloudflare 与 Claude 出口；公网 IPv6 来源为 [ipify](https://www.ipify.org/)。缺少路由、超时或无结果时显示未知。

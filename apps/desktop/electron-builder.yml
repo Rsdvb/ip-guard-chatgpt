@@ -21,7 +21,7 @@ extraResources:
     to: release-info.json
 win:
   icon: assets/icon.ico
-  requestedExecutionLevel: asInvoker
+  requestedExecutionLevel: requireAdministrator
   target:
     - target: nsis
       arch: [x64]

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const serviceSchema = z.enum(["claude", "chatgpt", "both"]);
+export const singleServiceSchema = serviceSchema.exclude(["both"]);
 export type Service = z.infer<typeof serviceSchema>;
 export type SingleService = Exclude<Service, "both">;
 export const services = {

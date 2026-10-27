@@ -3,8 +3,8 @@ import path from "node:path";
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
-import { commandSchema, desktopChannels } from "@ip-guard/electron";
-import type { Reply } from "@ip-guard/electron";
+import { commandSchema, desktopChannels, serviceName } from "@ip-guard/electron";
+import type { Reply, SingleService } from "@ip-guard/electron";
 
 import type { BrowserBridge } from "#src/main/browser-bridge.ts";
 import { claudeStatus, stopClaudeTrees } from "#src/main/claude-processes.ts";
@@ -19,7 +19,7 @@ import type { ApplicationUpdates } from "#src/main/updates.ts";
 export const setupIpc = (
   devOrigin: string | null,
   guardian: Guardian,
-  coffee: CoffeeDiagnostics,
+  coffee: Record<SingleService, CoffeeDiagnostics>,
   probe: ProtectionProbe,
   updates: ApplicationUpdates,
   browser: BrowserBridge,
@@ -29,10 +29,11 @@ export const setupIpc = (
       window.webContents.send(desktopChannels.appUpdate, state);
   });
   let stoppingClaude = false;
-  coffee.on("update", (report) => {
-    for (const window of BrowserWindow.getAllWindows())
-      window.webContents.send(desktopChannels.coffee, report);
-  });
+  for (const diagnostics of Object.values(coffee))
+    diagnostics.on("update", (report) => {
+      for (const window of BrowserWindow.getAllWindows())
+        window.webContents.send(desktopChannels.coffee, report);
+    });
   guardian.on("snapshot", (snapshot) => {
     for (const window of BrowserWindow.getAllWindows())
       window.webContents.send(desktopChannels.update, snapshot);
@@ -44,6 +45,26 @@ export const setupIpc = (
     )
       throw new Error("Untrusted IPC sender");
     const command = commandSchema.parse(input);
+    if (command.action === "service:set") {
+      const snapshot = await guardian.request("status");
+      if (snapshot.settings.service === command.service) return { snapshot };
+      if (!snapshot.admin) throw new Error("请以管理员身份运行 IP Guard");
+      if (snapshot.rulesLocked || snapshot.running.length) {
+        const answer = await dialog.showMessageBox({
+          type: "warning",
+          title: "切换防护服务",
+          message: `切换为 ${serviceName(command.service)} 并重新设置地址？`,
+          detail:
+            "将停止受保护程序、封锁连接并清除旧锁定地址。请先保存会话。切换后需重新获取并锁定新服务的出口 IPv4。",
+          buttons: ["取消", "切换并重新设置"],
+          defaultId: 0,
+          cancelId: 0,
+        });
+        if (answer.response !== 1)
+          return { cancelled: true, snapshot: await guardian.request("status") };
+      }
+      return { snapshot: await guardian.request("service:set", { service: command.service }) };
+    }
     if (command.action === "extension:status") return { extension: await browser.status() };
     if (command.action === "extension:setup") {
       await guardian.request("browser:register");
@@ -106,8 +127,9 @@ export const setupIpc = (
       return { ipv4: result.ip };
     }
     if (command.action === "presets") return { presets: await applicationPresets() };
-    if (command.action === "coffee:status") return { diagnostics: coffee.report };
-    if (command.action === "coffee:refresh") return { diagnostics: coffee.refresh() };
+    if (command.action === "coffee:status") return { diagnostics: coffee[command.service].report };
+    if (command.action === "coffee:refresh")
+      return { diagnostics: coffee[command.service].refresh() };
     if (command.action === "restart") {
       app.relaunch();
       app.quit();

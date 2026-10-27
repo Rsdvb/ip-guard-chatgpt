@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-import { serviceSchema, serviceSource } from "./services.ts";
+import { serviceSchema, serviceSource, singleServiceSchema } from "./services.ts";
 export { formatIPText } from "./ip-display.ts";
 export * from "./services.ts";
 export * from "./browser-policy.ts";
 
-export const nativeVersion = "0.10.0";
-export const nativeProtocol = 7;
+export const nativeVersion = "0.10.1";
+export const nativeProtocol = 8;
 export const browserExtensionId = "blmgamidelconfabgilaacbkokomegep";
 export const browserHostName = "com.ipguard.browser";
 export const browserStateSchema = z
@@ -52,11 +52,12 @@ export const coffeeMetricSchema = z.object({
   status: z.enum(["neutral", "ok", "info", "warning", "error", "unknown"]),
 });
 export const coffeeReportSchema = z.object({
+  service: singleServiceSchema,
   phase: z.enum(["idle", "running", "complete"]),
   checkedAt: z.string(),
   error: z.string(),
-  claudeIp: z.string(),
-  claudeTimezone: z.string(),
+  serviceIp: z.string(),
+  serviceTimezone: z.string(),
   groups: z.array(
     z.object({ id: z.string(), title: z.string(), items: z.array(coffeeMetricSchema) }),
   ),
@@ -158,6 +159,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("check") }),
   z.object({ action: z.literal("lock"), settings: settingsSchema }),
   z.object({ action: z.literal("unlock") }),
+  z.object({ action: z.literal("service:set"), service: serviceSchema }),
   z.object({ action: z.literal("add"), app: appSchema }),
   z.object({
     action: z.literal("edit"),
@@ -179,8 +181,8 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("logs") }),
   z.object({ action: z.literal("elevate") }),
   z.object({ action: z.literal("restart") }),
-  z.object({ action: z.literal("coffee:status") }),
-  z.object({ action: z.literal("coffee:refresh") }),
+  z.object({ action: z.literal("coffee:status"), service: singleServiceSchema }),
+  z.object({ action: z.literal("coffee:refresh"), service: singleServiceSchema }),
   z.object({ action: z.literal("update:status") }),
   z.object({ action: z.literal("update:check") }),
   z.object({ action: z.literal("update:download") }),
