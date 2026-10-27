@@ -15,6 +15,7 @@ namespace IpGuard {
     public sealed class Rule {
         public Settings settings = new Settings();
         public bool rulesLocked, enabled;
+        public bool stopOnProbeFailure=true;
     }
     public sealed class Target {
         public string service;

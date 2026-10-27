@@ -130,9 +130,11 @@ namespace IpGuard {
                                 writer.WriteLine("started");
                                 if(ReadTimed(reader,5000)!="run") throw new Exception("启动许可已撤销。");
                                 lease.Begin(reader); if(window!=null) window.Success(ip,expected);
+                                if(!TerminalProcess.IsConsole(exe)) WindowActivation.AllowSetForegroundWindow(info.pid);
                                 if(window!=null ? !window.WaitForRelease(lease.Alive) : !lease.Alive()) throw new Exception("启动许可已撤销，程序保持停止。");
                                 TerminalProcess.MarkStarted();
                                 if(Win32.ResumeThread(info.thread)==UInt32.MaxValue) throw new Exception("恢复目标进程失败。");
+                                writer.WriteLine("resumed");
                                 MonitorProcess(info,lease);
                                 uint exitCode; Win32.Check(Win32.GetExitCodeProcess(info.process,out exitCode)); return exitCode==259 ? 1 : unchecked((int)exitCode);
                             }

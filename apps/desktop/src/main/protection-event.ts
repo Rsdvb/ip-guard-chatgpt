@@ -14,6 +14,7 @@ export function detectProtectionStop(
   if (stopping || !previous) return;
   for (const service of serviceKeys) {
     const rule = current.services[service];
+    if (current.online && rule.unverified && !rule.stopOnProbeFailure) continue;
     if (rule.ready || !rule.rulesLocked || !rule.enabled) continue;
     const apps = previous.apps
       .filter(

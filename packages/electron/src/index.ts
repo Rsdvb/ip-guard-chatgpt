@@ -5,8 +5,8 @@ export { formatIPText } from "./ip-display.ts";
 export * from "./services.ts";
 export * from "./browser-policy.ts";
 
-export const nativeVersion = "0.11.1";
-export const nativeProtocol = 9;
+export const nativeVersion = "0.12.0";
+export const nativeProtocol = 10;
 export const browserExtensionId = "blmgamidelconfabgilaacbkokomegep";
 export const browserHostName = "com.ipguard.browser";
 export const browserPermissionSchema = z
@@ -140,6 +140,8 @@ export const adapterSchema = z.object({
   error: z.string(),
 });
 export const serviceSnapshotSchema = z.object({
+  stopOnProbeFailure: z.boolean(),
+  unverified: z.boolean(),
   ready: z.boolean(),
   checking: z.boolean(),
   currentIp: z.string(),
@@ -162,6 +164,13 @@ export const snapshotSchema = z.object({
   networkAdapters: z.array(adapterSchema),
   watchedAdapter: adapterSchema,
   networkAdapterId: z.string(),
+  launches: z.array(
+    z.object({
+      id: z.uuid(),
+      phase: z.enum(["starting", "started", "failed"]),
+      message: z.string(),
+    }),
+  ),
   apps: z.array(appSchema),
   logs: z.array(logSchema),
 });
@@ -171,6 +180,11 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("lock"), service: serviceSchema, settings: settingsSchema }),
   z.object({ action: z.literal("unlock"), service: serviceSchema }),
   z.object({ action: z.literal("service:enable"), service: serviceSchema, enabled: z.boolean() }),
+  z.object({
+    action: z.literal("failure-policy"),
+    service: serviceSchema,
+    stopOnProbeFailure: z.boolean(),
+  }),
   z.object({ action: z.literal("add"), app: appSchema }),
   z.object({
     action: z.literal("edit"),

@@ -63,6 +63,8 @@ import { UpdatePanel } from "#src/components/update-panel.tsx";
 import "#src/guard.css";
 
 const initialRule = (): ServiceSnapshot => ({
+  stopOnProbeFailure: true,
+  unverified: false,
   ready: false,
   checking: false,
   currentIp: "",
@@ -91,6 +93,7 @@ const initial: Snapshot = {
     error: "",
   },
   networkAdapterId: "",
+  launches: [],
   apps: [],
   logs: [],
 };
@@ -674,9 +677,11 @@ export function GuardApp() {
           ? "已暂停"
           : !locked
             ? "待锁定"
-            : rule.ready
-              ? "IPv4 匹配"
-              : "已阻断";
+            : rule.unverified
+              ? "IP 未确认 · 保留运行"
+              : rule.ready
+                ? "IPv4 匹配"
+                : "已阻断";
   const lock = async (settings: Settings) => {
     const result = await invoke({ action: "lock", service: selectedService, settings });
     if (result?.snapshot) {
@@ -745,6 +750,8 @@ export function GuardApp() {
         <div className="app-list">
           {snapshot.apps.map((target) => {
             const running = snapshot.running.includes(target.id);
+            const launch = snapshot.launches.find((item) => item.id === target.id);
+            const starting = launch?.phase === "starting";
             const targetRule = snapshot.services[target.service];
             const targetLocked = targetRule.rulesLocked && targetRule.enabled;
             const actionReason = !bridge
@@ -771,22 +778,32 @@ export function GuardApp() {
                   <h3>
                     {target.name} <small>{serviceName(target.service)}</small>
                     <span className={`small-status ${running ? "good" : ""}`}>
-                      {running
-                        ? "运行中"
-                        : target.enabled
-                          ? !targetRule.rulesLocked
-                            ? "待锁定"
-                            : !targetRule.enabled
-                              ? "已暂停"
-                              : targetRule.ready
-                                ? "待启动"
-                                : "已阻断"
-                          : "未启用"}
+                      {starting
+                        ? "启动中"
+                        : running
+                          ? "运行中"
+                          : target.enabled
+                            ? !targetRule.rulesLocked
+                              ? "待锁定"
+                              : !targetRule.enabled
+                                ? "已暂停"
+                                : targetRule.ready
+                                  ? "待启动"
+                                  : "已阻断"
+                            : "未启用"}
                     </span>
                   </h3>
                   <div title={target.path} className="app-path mono">
                     {target.path}
                   </div>
+                  {launch?.phase === "failed" && (
+                    <div className="form-error" role="alert">
+                      {formatIPText(launch.message, ipsVisible)}
+                    </div>
+                  )}
+                  {launch?.phase === "started" && running && (
+                    <div className="muted">{launch.message}</div>
+                  )}
                   {actionReason && (
                     <div className="app-action-reason" id={`app-reason-${target.id}`}>
                       {actionReason}
@@ -797,7 +814,7 @@ export function GuardApp() {
                   <Toggle
                     checked={target.enabled}
                     label={`${target.enabled ? "解除" : "启用"} ${target.name} 防护`}
-                    disabled={busy || !available || (!target.enabled && !targetLocked)}
+                    disabled={busy || starting || !available || (!target.enabled && !targetLocked)}
                     onChange={() =>
                       void invoke({ action: "protect", id: target.id, enabled: !target.enabled })
                     }
@@ -805,26 +822,34 @@ export function GuardApp() {
                   <button
                     type="button"
                     className={`btn ${running ? "" : "launch"}`}
-                    disabled={busy || Boolean(actionReason)}
+                    disabled={busy || starting || Boolean(actionReason)}
                     title={
-                      busy
-                        ? "操作处理中"
-                        : actionReason || (running ? "停止受保护进程树" : "校验 IP 并启动")
+                      starting
+                        ? "正在等待应用窗口"
+                        : busy
+                          ? "操作处理中"
+                          : actionReason || (running ? "停止受保护进程树" : "校验 IP 并启动")
                     }
                     aria-describedby={actionReason ? `app-reason-${target.id}` : undefined}
                     onClick={() =>
                       void invoke({ action: running ? "stop" : "start", id: target.id })
                     }
                   >
-                    {running ? <Square size={13} /> : <Play size={14} />}
-                    {running ? "停止" : "启动"}
+                    {starting ? (
+                      <LoaderCircle size={14} className="spin" />
+                    ) : running ? (
+                      <Square size={13} />
+                    ) : (
+                      <Play size={14} />
+                    )}
+                    {starting ? "启动中…" : running ? "停止" : "启动"}
                   </button>
                   <button
                     type="button"
                     className="icon-btn"
                     title="编辑启动参数"
                     aria-label={`编辑 ${target.name}`}
-                    disabled={busy || !available}
+                    disabled={busy || starting || !available}
                     onClick={() => setEditing(target)}
                   >
                     <Pencil size={16} />
@@ -834,7 +859,7 @@ export function GuardApp() {
                     className="icon-btn delete-btn"
                     title="移除程序"
                     aria-label={`移除 ${target.name}`}
-                    disabled={busy || !available}
+                    disabled={busy || starting || !available}
                     onClick={() => void invoke({ action: "remove", id: target.id })}
                   >
                     <Trash2 size={16} />
@@ -1002,9 +1027,11 @@ export function GuardApp() {
                         ? "待锁定"
                         : !item.enabled
                           ? "已暂停 · 已阻断"
-                          : item.ready
-                            ? "防护中 · IP 匹配"
-                            : "已阻断"}
+                          : item.unverified
+                            ? "IP 未确认 · 保留运行"
+                            : item.ready
+                              ? "防护中 · IP 匹配"
+                              : "已阻断"}
                     </span>
                     <small className="mono">
                       {formatIPText(item.settings.expectedIp || "尚未设置", ipsVisible)}
@@ -1203,6 +1230,32 @@ export function GuardApp() {
                     onServiceChange={changeService}
                     onFetch={fetchIPv4}
                   />
+                </section>
+                <section className="panel settings-panel">
+                  <div className="panel-heading">
+                    <h2>{serviceName(selectedService)} 检测失败处理</h2>
+                  </div>
+                  <div className="setting-row">
+                    <div>
+                      <strong>获取不到 IP 时自动结束程序</strong>
+                      <p className="muted">
+                        关闭后保留已运行程序，期间无法确认出口。新启动和网页仍需校验；已确认 IP
+                        不符时仍会结束并阻断。
+                      </p>
+                    </div>
+                    <Toggle
+                      label={`${serviceName(selectedService)} 获取不到 IP 时自动结束程序`}
+                      checked={rule.stopOnProbeFailure}
+                      disabled={busy || !available}
+                      onChange={() =>
+                        void invoke({
+                          action: "failure-policy",
+                          service: selectedService,
+                          stopOnProbeFailure: !rule.stopOnProbeFailure,
+                        })
+                      }
+                    />
+                  </div>
                 </section>
                 <section className="panel settings-panel">
                   <div className="panel-heading">

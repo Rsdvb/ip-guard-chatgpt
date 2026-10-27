@@ -227,17 +227,22 @@ export class Guardian extends EventEmitter {
           claude: {
             ...this.snapshot.services.claude,
             ready: false,
+            unverified: false,
             checking: false,
             reason: message,
           },
           chatgpt: {
             ...this.snapshot.services.chatgpt,
             ready: false,
+            unverified: false,
             checking: false,
             reason: message,
           },
         },
         running: [],
+        launches: this.snapshot.launches.map((launch) =>
+          launch.phase === "starting" ? { ...launch, phase: "failed", message } : launch,
+        ),
       };
       this.emit("snapshot", this.snapshot);
     }

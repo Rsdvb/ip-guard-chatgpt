@@ -27,6 +27,7 @@ namespace IpGuard {
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern int GetPackagePathByFullName(string package, ref uint length, StringBuilder path);
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern int GetPackageFullName(IntPtr process, ref uint length, StringBuilder name);
         [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+        [DllImport("ole32.dll")] static extern int CoAllowSetForegroundWindow([MarshalAs(UnmanagedType.IUnknown)] object server,IntPtr reserved);
         static IPackageDebugSettings Debugger() { return (IPackageDebugSettings)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("B1AEC16F-2383-4852-B0E9-8F0B1DC66B4D"), true)); }
         static string PackagePath(string name) {
             uint length=0; int result=GetPackagePathByFullName(name, ref length, null);
@@ -111,7 +112,13 @@ namespace IpGuard {
             PackageIdentity package=Find(target.path);
             if(package==null) throw new Exception("安装包入口已变更，请重新选择 Desktop 路径。");
             IApplicationActivationManager manager=(IApplicationActivationManager)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C"),true));
-            try { uint pid; Marshal.ThrowExceptionForHR(manager.ActivateApplication(package.appUserModelId,target.arguments,2,out pid)); }
+            try {
+                // Activation and the subsequent launch-gate window each need an explicit foreground handoff.
+                CoAllowSetForegroundWindow(manager,IntPtr.Zero);
+                uint pid; int result=manager.ActivateApplication(package.appUserModelId,target.arguments,2,out pid);
+                if(result<0) throw new Exception("Windows 激活安装包失败 · 0x"+unchecked((uint)result).ToString("X8")+" · "+Marshal.GetExceptionForHR(result).Message);
+                if(pid==0) throw new Exception("Windows 未返回有效的应用实例。");
+            }
             finally { Marshal.ReleaseComObject(manager); }
         }
         public static Win32.ProcessInfo OpenTarget(Target target, uint pid, uint tid) {
