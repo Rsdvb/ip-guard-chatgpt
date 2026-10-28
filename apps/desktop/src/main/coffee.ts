@@ -88,6 +88,7 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
       : { host: "status.openai.com", url: "https://status.openai.com/" };
   }
   private refreshAfterRun = false;
+  private deferredRefresh = false;
   private collectingIp = "";
   constructor(service: Service, probe: ExitIPv4) {
     super();
@@ -119,6 +120,7 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
       ...(result.error ? { error: result.error } : {}),
     });
     if (changed) {
+      if (!this.timer) this.deferredRefresh = true;
       this.country = "";
       this.report.serviceTimezone = "";
       for (const group of this.report.groups)
@@ -156,7 +158,11 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
   >();
   start() {
     if (this.timer || this.stopped) return;
-    if (!this.report.checkedAt || Date.now() - Date.parse(this.report.checkedAt) >= 300000)
+    if (
+      this.deferredRefresh ||
+      !this.report.checkedAt ||
+      Date.now() - Date.parse(this.report.checkedAt) >= 300000
+    )
       this.refresh();
     this.timer = setInterval(() => this.refresh(), 300000);
     this.timer.unref();
@@ -231,6 +237,7 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
   }
   refresh(): CoffeeReport {
     if (this.report.phase === "running" || this.stopped) return this.report;
+    this.deferredRefresh = false;
     this.collectingIp = "";
     this.report = {
       service: this.service,

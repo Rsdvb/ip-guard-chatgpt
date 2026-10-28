@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readdir, readFile } from "node:fs/promises";
 import { cpus } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -26,6 +27,41 @@ function processUsage(value: unknown): {
   return { pid: value.pid, parent: value.parent, seconds: value.seconds, rss: value.rss };
 }
 async function processes() {
+  if (process.platform === "linux") {
+    const ticks = Number((await run("getconf", ["CLK_TCK"])).stdout.trim());
+    const page = Number((await run("getconf", ["PAGESIZE"])).stdout.trim());
+    if (!Number.isSafeInteger(ticks) || ticks <= 0 || !Number.isSafeInteger(page) || page <= 0)
+      throw new Error("Invalid proc clock configuration");
+    const rows = await Promise.all(
+      (await readdir("/proc"))
+        .filter((name) => /^\d+$/.test(name))
+        .map(async (name) => {
+          try {
+            const source = await readFile(`/proc/${name}/stat`, "utf8"),
+              fields = source
+                .slice(source.lastIndexOf(")") + 2)
+                .trim()
+                .split(/\s+/);
+            return processUsage({
+              pid: Number(name),
+              parent: Number(fields[1]),
+              seconds: (Number(fields[11]) + Number(fields[12])) / ticks,
+              rss: Number(fields[21]) * page,
+            });
+          } catch (error) {
+            if (
+              error &&
+              typeof error === "object" &&
+              "code" in error &&
+              ["ENOENT", "ESRCH", "EACCES"].includes(String(error.code))
+            )
+              return null;
+            throw error;
+          }
+        }),
+    );
+    return rows.filter((row) => row !== null);
+  }
   if (process.platform === "win32") {
     const { stdout } = await run(
       "powershell.exe",
@@ -66,6 +102,21 @@ export async function sampleResources(pid: number, scope: string) {
   const after = await processes(),
     elapsed = (performance.now() - start) / 1000;
   const selected = new Set([pid]);
+  if (process.platform === "linux" && process.env.IP_GUARD_EXPECT_SYSTEM) {
+    const systemPID = Number(
+      (
+        await run("/bin/systemctl", [
+          "show",
+          `ipguard@${process.getuid?.()}.service`,
+          "--property=MainPID",
+          "--value",
+        ])
+      ).stdout.trim(),
+    );
+    if (!Number.isSafeInteger(systemPID) || systemPID < 2)
+      throw new Error("System guardian PID missing");
+    selected.add(systemPID);
+  }
   let added = true;
   while (added) {
     added = false;
@@ -93,6 +144,8 @@ export async function sampleResources(pid: number, scope: string) {
     rssMiB: result.reduce((sum, item) => sum + item.rss, 0) / 1048576,
     processes: result.length,
     includesNativeChildren: true,
+    includesRootSystemGuardian:
+      process.platform === "linux" && Boolean(process.env.IP_GUARD_EXPECT_SYSTEM),
     configuration: "idle, no registered programs; CI VM measurement",
   };
 }

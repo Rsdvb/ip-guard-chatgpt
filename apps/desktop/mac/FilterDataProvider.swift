@@ -40,7 +40,7 @@ final class FilterDataProvider: NEFilterDataProvider {
         var location: CFURL?
         let located = SecCodeCopyPath(staticCode, [], &location) == errSecSuccess
         var information: CFDictionary?
-        let signed = SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess
+        let signed = SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess
         let identifier = signed ? (information as? [String: Any])?[kSecCodeInfoIdentifier as String] as? String : nil
         let uid = token.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt32.self) }
         let result = FlowIdentity(path: located ? location.map { ($0 as URL).standardizedFileURL.path } : nil, identifier: identifier, uid: uid)
