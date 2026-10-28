@@ -1,0 +1,60 @@
+name: Windows packaged diagnostics
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Completed build containing the Windows installer
+        required: true
+        default: "40681280829"
+permissions:
+  contents: read
+  actions: read
+jobs:
+  packaged:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      CI: true
+      DEBUG: pw:browser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          name: ip-guard-windows-2025
+          path: ${{ runner.temp }}/ipg-artifacts
+      - name: Extract existing installer without launching it
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $stage=Join-Path $env:RUNNER_TEMP 'ipg-nsis'
+          $application=Join-Path $env:RUNNER_TEMP 'ipg-app'
+          $installer=Join-Path $env:RUNNER_TEMP 'ipg-artifacts/apps/desktop/release/IP-Guard-Setup-0.14.0.exe'
+          & 'C:/Program Files/7-Zip/7z.exe' x $installer "-o$stage" -y
+          if($LASTEXITCODE -ne 0){throw 'Installer extraction failed'}
+          $image=@(Get-ChildItem -LiteralPath $stage -Recurse -Filter 'app-64.7z')
+          if($image.Count -ne 1){throw 'Expected one embedded application'}
+          & 'C:/Program Files/7-Zip/7z.exe' x $image[0].FullName "-o$application" -y
+          if($LASTEXITCODE -ne 0){throw 'Application extraction failed'}
+          "IP_GUARD_PACKAGED_EXECUTABLE=$application/IP Guard.exe" >> $env:GITHUB_ENV
+      - name: Inspect real packaged window and tray behavior
+        shell: bash
+        run: node apps/web/tests/platform/desktop-smoke.ts 2>&1 | tee windows-diagnostic.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-diagnostic
+          path: |
+            windows-diagnostic.log
+            packaged-smoke.json
+            cold-tray-smoke.json
+            apps/web/test-results/packaged-win32.png
