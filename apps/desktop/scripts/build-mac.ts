@@ -36,6 +36,11 @@ for (const entry of [
     files: ["Policy.swift", "PolicyTests.swift"],
     binary: path.join(output, "PolicyTests"),
   },
+  {
+    module: "IPGuardProcessTests",
+    files: ["Policy.swift", "ProcessMonitor.swift", "ProcessMonitorTests.swift"],
+    binary: path.join(output, "ProcessMonitorTests"),
+  },
 ]) {
   const built = spawnSync(
     "xcrun",
@@ -67,6 +72,8 @@ for (const entry of [
 }
 const tested = spawnSync(path.join(output, "PolicyTests"), [], { stdio: "inherit" });
 if (tested.status !== 0) throw tested.error || new Error("Swift policy tests failed");
+const processes = spawnSync(path.join(output, "ProcessMonitorTests"), [], { stdio: "inherit" });
+if (processes.status !== 0) throw processes.error || new Error("macOS real process tests failed");
 console.log(
   "macOS network extension, authenticated XPC controller and policy tests compiled; system activation requires Developer ID signing",
 );

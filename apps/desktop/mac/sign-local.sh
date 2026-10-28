@@ -30,7 +30,7 @@ if [[ -d "$BUILD/com.ip-guard.desktop.filter.systemextension" ]]; then
   mkdir -p "$APP/Contents/Library/SystemExtensions"
   mv "$BUILD/com.ip-guard.desktop.filter.systemextension" "$EXTENSION"
   mv "$BUILD/IpGuardMacControl" "$CONTROL"
-  rm -f -- "$BUILD/PolicyTests"
+  rm -f -- "$BUILD/PolicyTests" "$BUILD/ProcessMonitorTests"
   rmdir "$BUILD"
 fi
 [[ -f "$CONTROL" && -d "$EXTENSION" ]] || { echo 'Missing compiled macOS components' >&2; exit 1; }

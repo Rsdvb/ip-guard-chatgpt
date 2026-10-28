@@ -184,7 +184,7 @@ func runDaemon(uid uint32) error {
 	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
-	go func() { <-signals; e.mu.Lock(); e.detach(); e.mu.Unlock(); listener.Close() }()
+	go func() { <-signals; e.close(false); listener.Close() }()
 	return serve(e, listener)
 }
 func enable(uid uint32) error {
@@ -255,7 +255,13 @@ func main() {
 	case "enable":
 		err = enable(uint32(id))
 	case "recover":
-		err = recoverUser(uint32(id))
+		var result []byte
+		result, err = exec.Command("/usr/bin/systemctl", "disable", "--now", fmt.Sprintf("ipguard@%d.service", id)).CombinedOutput()
+		if err != nil {
+			err = fmt.Errorf("stop system guardian: %s: %w", result, err)
+		} else {
+			err = recoverUser(uint32(id))
+		}
 	default:
 		err = errors.New("unknown system operation")
 	}

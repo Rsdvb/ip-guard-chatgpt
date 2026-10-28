@@ -538,7 +538,14 @@ export class PosixGuardian extends EventEmitter {
       throw new Error("请选择应用本身；系统、终端和通用解释器保留普通启动方式");
     if (!(await stat(file)).isFile()) throw new Error("请选择应用中的实际可执行文件");
     await access(file, constants.X_OK);
-    if (file === (await realpath(this.options.executable)))
+    const own = await realpath(this.options.executable);
+    const ownBundle =
+      process.platform === "darwin" ? own.match(/^(.*\.app)\/Contents\//)?.[1] : undefined;
+    if (
+      file === own ||
+      (ownBundle && file.startsWith(ownBundle + "/")) ||
+      file.startsWith("/usr/lib/ipguard/")
+    )
       throw new Error("不能把 IP Guard 自身作为受保护程序");
     return file;
   }

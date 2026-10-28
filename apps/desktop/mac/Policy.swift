@@ -100,6 +100,7 @@ final class PolicyStore {
         guard let sequence = policy.sequence, sequence > 0 else { throw PolicyError.invalid }
         let index = RuleIndex(policy.targets)
         lock.lock(); defer { lock.unlock() }
+        if let active = peers[uid], active != peer, let deadline = deadlines[uid], now <= deadline { throw PolicyError.invalid }
         if peers[uid] == peer, sequence <= (revisions[uid] ?? 0) { throw PolicyError.invalid }
         rules[uid] = policy.targets.isEmpty ? nil : index
         peers[uid] = peer; revisions[uid] = sequence; deadlines[uid] = now + 3.5

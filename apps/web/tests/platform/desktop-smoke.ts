@@ -36,11 +36,19 @@ const resources =
 await access(path.join(resources, "browser-extension/manifest.json"));
 if (process.platform !== "win32") await access(path.join(resources, "posix/managed-run.mjs"));
 const profile = await realpath(await mkdtemp(path.join(tmpdir(), "ipg-desktop-")));
+// CI runs the Windows GUI under the runner's existing token; the installer manifest
+// retains requireAdministrator and the native snapshot records the effective token.
+const launchEnvironment = {
+  ...process.env,
+  ...(process.platform === "win32" ? { __COMPAT_LAYER: "RunAsInvoker" } : {}),
+};
 const application = await _electron.launch({
   executablePath: executable,
-  env: { ...process.env, IP_GUARD_USER_DATA_DIR: profile },
+  env: { ...launchEnvironment, IP_GUARD_USER_DATA_DIR: profile },
   timeout: 30000,
 });
+application.process().stdout?.on("data", (data) => process.stdout.write(data));
+application.process().stderr?.on("data", (data) => process.stderr.write(data));
 let nativeHost: ReturnType<typeof spawn> | undefined;
 try {
   const page = await application.firstWindow();
@@ -187,7 +195,7 @@ try {
     guardianOnline: true,
     rendererIPC: true,
     packagedNativeMessaging: true,
-    permission: "ordinary user",
+    permission: snapshot.admin ? "administrator" : "ordinary user",
     processProtection: snapshot.processProtection,
     resources: { foreground, hidden },
     hiddenNotificationsPaused: true,
@@ -209,7 +217,7 @@ const backgroundProfile = await realpath(await mkdtemp(path.join(tmpdir(), "ipg-
 const backgroundApp = await _electron.launch({
   executablePath: executable,
   args: ["--background"],
-  env: { ...process.env, IP_GUARD_USER_DATA_DIR: backgroundProfile },
+  env: { ...launchEnvironment, IP_GUARD_USER_DATA_DIR: backgroundProfile },
   timeout: 30000,
 });
 try {

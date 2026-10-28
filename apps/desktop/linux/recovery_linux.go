@@ -25,6 +25,10 @@ func recoverUser(uid uint32) error {
 			return errors.New("unexpected entry in IP Guard BPF directory")
 		}
 		pins := filepath.Join(root, entry.Name())
+		groupPath := fmt.Sprintf("/sys/fs/cgroup/ipguard-%d/%s", uid, entry.Name())
+		if err = os.WriteFile(filepath.Join(groupPath, "cgroup.kill"), []byte("1"), 0600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		for _, name := range []string{"ingress", "egress"} {
 			attached, err := link.LoadPinnedLink(filepath.Join(pins, name), nil)
 			if errors.Is(err, os.ErrNotExist) {
@@ -50,8 +54,7 @@ func recoverUser(uid uint32) error {
 		if err = os.Remove(pins); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		// A busy cgroup has no network links after unpinning and can finish normally.
-		_ = os.Remove(fmt.Sprintf("/sys/fs/cgroup/ipguard-%d/%s", uid, entry.Name()))
+		_ = os.Remove(groupPath)
 	}
 	_ = os.Remove(root)
 	_ = os.Remove(fmt.Sprintf("/sys/fs/cgroup/ipguard-%d", uid))
