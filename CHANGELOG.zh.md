@@ -1,5 +1,13 @@
 # 更新日志
 
+## 0.13.0 预发布 - 2026-10-28
+
+- 新增 Apple 芯片 macOS 和 Ubuntu 24.04 的独立 IP、网页防护、受控启动、检测失败处理、日志与登录启动。
+- POSIX 使用私有 Unix 连接、启动租约与进程组；Ubuntu 会话可用时采用 systemd 用户 cgroup。原快捷方式不会被启动拦截。
+- 提供服务名启动器和 Claude Code 终端入口，修复慢探针完成前启动连接被提前取消的问题。
+- Mac 新增可选 NetworkExtension 过滤器、签名身份校验的 XPC 通道、独立策略和本机签名脚本。当前只针对 `.app` 包；需要用户最后完成 Developer ID、描述文件、公证和系统授权后验证。
+- 增加真实 OS 进程与打包后 GUI / IPC / Native Messaging 验证，提供 Mac arm64 ZIP、Ubuntu amd64 DEB / tar.gz。保持 Windows 0.12.1 为稳定下载入口。
+
 ## 0.12.1 - 2026-10-27
 
 - 修复浏览器扩展显示「校验通过」后点击返回仍停在检测页的问题：放行规则显式包含主页面导航，覆盖 Claude、ChatGPT 当前及旧版域名。

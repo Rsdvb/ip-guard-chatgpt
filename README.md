@@ -1,18 +1,22 @@
 # IP Guard
 
 ![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078D4)
+![macOS preview](https://img.shields.io/badge/macOS-Apple%20Silicon%20preview-555555)
+![Ubuntu preview](https://img.shields.io/badge/Ubuntu-24.04%20amd64%20preview-E95420)
 
-面向 Windows 的公网 IPv4 防护工具。为 Claude 和 ChatGPT 分别锁定允许的服务出口 IPv4，在应用启动前校验，运行期间持续监测；地址异常时结束受保护进程树。配套 Chrome / Edge 扩展保护相应服务的网页。
+公网 IPv4 防护工具。为 Claude 和 ChatGPT 分别锁定允许的服务出口 IPv4，在应用启动前校验，运行期间持续监测；地址异常时结束受控进程。配套 Chrome / Edge 扩展保护相应服务的网页。
 
-本仓库为 **0.12.1 Windows 修改版**，支持 Claude / ChatGPT 独立 IP、启停与阻断、独立诊断、ChatGPT 安装识别与默认管理员启动。基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`。安装包见本仓库 Releases；随附的本地构建未绑定自动更新源。
+基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`。Windows 稳定版为 **0.12.1**；新增 **0.13.0 Apple 芯片 Mac / Ubuntu 24.04 测试版**，支持独立 IP、网页防护和受控启动。Mac 可选系统过滤需签名、公证和授权。安装与范围见 [跨平台说明](CROSS_PLATFORM.zh.md)。本地构建未绑定自动更新源。
 
-验证情况：单元、浏览器端到端和 Windows 原生规则测试覆盖独立授权、暂停、配置迁移及并行检测。真实 Claude / ChatGPT Desktop 的网络切换阻断和安装/卸载恢复仍需安装后实测。安装包未签名；本次不含 Mac 移植。
+验证情况：单元、浏览器端到端、Windows 原生规则和 POSIX 进程测试覆盖独立授权、暂停、配置迁移和并行检测。真实账户、TUN / VPN、睡眠唤醒、升级卸载及已授权 Mac 系统过滤仍需目标机器验证。Windows 包未签名；Mac 测试包采用 ad-hoc 签名，尚未以 Developer ID 公证。
 
-为避免上传时申请额外的 Actions 工作流写入权限，原工作流保留在 `ci-templates/release.yml`，默认不启用。本仓库使用新的源码快照提交，原始历史可在上述上游提交查看。
+原 Windows 发布工作流保留在 `ci-templates/release.yml`，默认不启用。新增手动跨平台 CI `.github/workflows/posix-preview.yml`，验证 macOS arm64 / Ubuntu 24.04，不自动发布。原始历史可在上述上游提交查看。
 
-**[下载本仓库版本](https://github.com/Rsdvb/ip-guard-chatgpt/releases/latest)** · [快速开始](#快速开始) · [浏览器扩展](#浏览器扩展) · [开发构建](#开发构建) · [更新日志](CHANGELOG.zh.md) · [问题反馈](https://github.com/Rsdvb/ip-guard-chatgpt/issues)
+**[Windows 稳定版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/latest)** · **[Mac / Ubuntu 测试版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.13.0)** · [快速开始](#快速开始) · [浏览器扩展](#浏览器扩展) · [开发构建](#开发构建) · [更新日志](CHANGELOG.zh.md) · [问题反馈](https://github.com/Rsdvb/ip-guard-chatgpt/issues)
 
 ## 功能特性
+
+Mac / Ubuntu 用户请先阅读 [测试版安装与能力边界](CROSS_PLATFORM.zh.md)。以下快速开始中的 Windows 启动拦截不代表其他系统已具备同样的系统级拦截能力。
 
 - **IP 锁定与持续防护**：启动前校验公网 IPv4，后台轮询并响应网络变化，异常时结束受控进程树。
 - **停止提醒**：自动停止后弹窗显示原因、受影响程序与恢复步骤，IP 默认脱敏。
