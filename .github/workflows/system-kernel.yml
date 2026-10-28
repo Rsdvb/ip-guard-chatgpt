@@ -1,0 +1,30 @@
+name: Ubuntu system protection kernel tests
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: apps/desktop/linux/go.sum
+      - name: Compile and test policy boundaries
+        working-directory: apps/desktop/linux
+        run: |
+          go test ./...
+          go test -c -buildvcs=false -o "$RUNNER_TEMP/ipguard-kernel.test" .
+      - name: Test actual exec permission and kernel network blocking
+        shell: bash
+        run: |
+          set -o pipefail
+          sudo env IP_GUARD_KERNEL_TEST=1 IP_GUARD_TEST_UID="$(id -u)" IP_GUARD_TEST_GID="$(id -g)" "$RUNNER_TEMP/ipguard-kernel.test" -test.v -test.timeout=2m 2>&1 | tee kernel-validation.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ubuntu-kernel-validation
+          path: kernel-validation.log
