@@ -34,7 +34,8 @@ final class ProcessMonitor {
         guard pid > 1, pid != getpid() else { return nil }
         var info = proc_bsdinfo()
         guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size)) == Int32(MemoryLayout<proc_bsdinfo>.size), info.pbi_uid == getuid() else { return nil }
-        var buffer = [CChar](repeating: 0, count: Int(PROC_PIDPATHINFO_MAXSIZE))
+        // Darwin exposes MAXPATHLEN to Swift, but not the proc-info expression macro.
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         let count = proc_pidpath(pid, &buffer, UInt32(buffer.count))
         if count > 0 { return ProcessRecord(pid: pid, path: String(cString: buffer), seconds: info.pbi_start_tvsec, micros: info.pbi_start_tvusec) }
         if let old = previous, old.seconds == info.pbi_start_tvsec, old.micros == info.pbi_start_tvusec { return old }
