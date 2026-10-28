@@ -14,7 +14,13 @@ import {
 import path from "node:path";
 import { createInterface } from "node:readline";
 
-import { nativeVersion, nativeProtocol, snapshotSchema } from "@ip-guard/electron";
+import {
+  browserExtensionId,
+  browserStateSchema,
+  nativeVersion,
+  nativeProtocol,
+  snapshotSchema,
+} from "@ip-guard/electron";
 
 assert.equal(process.env.GITHUB_ACTIONS, "true");
 assert.equal(process.env.RUNNER_ENVIRONMENT, "github-hosted");
@@ -69,6 +75,45 @@ const rule = (expectedIp: string) => ({
 const packageId = randomUUID(),
   missingId = randomUUID(),
   validId = randomUUID();
+async function releasedBrowser() {
+  const host = spawn(native, [`chrome-extension://${browserExtensionId}/`], {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let buffer = Buffer.alloc(0);
+  const frame = new Promise<unknown>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Released browser status timed out")), 6000);
+    host.once("error", reject);
+    host.stdout.on("data", (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32LE()) {
+        clearTimeout(timeout);
+        resolve(JSON.parse(buffer.subarray(4, 4 + buffer.readUInt32LE()).toString()));
+      }
+    });
+  });
+  try {
+    const request = Buffer.from(JSON.stringify({ action: "watch", protocol: 3 })),
+      header = Buffer.alloc(4);
+    header.writeUInt32LE(request.length);
+    host.stdin.write(Buffer.concat([header, request]));
+    const status = browserStateSchema.parse(await frame);
+    assert.equal(status.services.claude.phase, "released");
+    assert.equal(status.services.chatgpt.phase, "released");
+    if (host.exitCode === null) await once(host, "exit");
+    assert.equal(
+      host.exitCode,
+      0,
+      "A released host must exit cleanly rather than lock the installation files after exit",
+    );
+  } finally {
+    const ended = once(host, "exit");
+    host.stdin.end();
+    const timeout = setTimeout(() => host.kill(), 4000);
+    if (host.exitCode === null) await ended;
+    clearTimeout(timeout);
+  }
+}
 async function guardian(expected: string) {
   const child = spawn(native, ["guard"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   let stderr = "";
@@ -180,6 +225,7 @@ async function guardian(expected: string) {
     );
     assert.equal(released.status, 0, released.stdout + released.stderr);
     console.log(released.stdout.trim());
+    await releasedBrowser();
     await request("shutdown");
     await once(child, "exit");
   } finally {

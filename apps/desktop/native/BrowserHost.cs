@@ -38,8 +38,8 @@ namespace IpGuard {
                     bool present,defaulted; IntPtr dacl,sacl;
                     Win32.Check(GetSecurityDescriptorDacl(descriptor,out present,out dacl,out defaulted));
                     Win32.Check(GetSecurityDescriptorSacl(descriptor,out present,out sacl,out defaulted));
-                    uint result=SetSecurityInfo(pipe.SafePipeHandle.DangerousGetHandle(),1,0x80000014,IntPtr.Zero,IntPtr.Zero,dacl,sacl);
-                    if(result!=0) throw new System.ComponentModel.Win32Exception((int)result,"浏览器管道权限设置失败");
+                    uint result=SetSecurityInfo(pipe.SafePipeHandle.DangerousGetHandle(),6,0x80000014,IntPtr.Zero,IntPtr.Zero,dacl,sacl);
+                    if(result!=0) throw new System.ComponentModel.Win32Exception((int)result,"浏览器管道权限设置失败 · Windows 错误 "+result);
                 } finally { LocalFree(descriptor); }
             }
         }
@@ -68,6 +68,10 @@ namespace IpGuard {
             if(bytes.Length>16384) throw new IOException("浏览器消息过长");
             byte[] length=BitConverter.GetBytes((uint)bytes.Length); output.Write(length,0,4); output.Write(bytes,0,bytes.Length); output.Flush();
         }
+        static string ReleasedMessage() {
+            var permission=new { phase="released",currentIp="",expectedIp="",checkedAt="",reason="IP Guard 已完全退出并解除防护；重新打开后恢复校验" };
+            return Data.Json().Serialize(new { protocol=3,appVersion=BuildInfo.Version,services=new { claude=permission,chatgpt=permission } });
+        }
         public static int Run(string origin) {
             if(origin!="chrome-extension://"+BuildInfo.ExtensionId+"/") return 1;
             using(Stream input=Console.OpenStandardInput()) using(Stream output=Console.OpenStandardOutput()) {
@@ -91,8 +95,12 @@ namespace IpGuard {
                         }
                     }
                 } catch(Exception error) {
+                    if(File.Exists(Released) && (error is IOException || error is TimeoutException)) {
+                        try { Send(output,ReleasedMessage()); } catch(IOException) { }
+                        return 0;
+                    }
                     string reason=error is UnauthorizedAccessException ? "浏览器连接权限不足，请升级并重启 IP Guard" : "本地守护连接失败 · "+error.GetBaseException().Message;
-                    object permission=File.Exists(Released) && !(error is UnauthorizedAccessException) ? new { phase="released",currentIp="",expectedIp="",checkedAt="",reason="IP Guard 已完全退出并解除防护；重新打开后恢复校验" } : Offline(reason);
+                    object permission=Offline(reason);
                     try { Send(output,Data.Json().Serialize(new { protocol=3,appVersion=BuildInfo.Version,services=new { claude=permission,chatgpt=permission } })); } catch(IOException) { }
                     return 1;
                 }

@@ -47,6 +47,7 @@ namespace IpGuard {
                     string line=Console.ReadLine();
                     var initialize=line==null ? null : Data.Json().Deserialize<System.Collections.Generic.Dictionary<string,object>>(line);
                     if(initialize==null || initialize["action"] as string!="initialize" || initialize["version"] as string!=BuildInfo.Version || Convert.ToInt32(initialize["protocol"])!=BuildInfo.Protocol) throw new Exception("界面与原生组件版本不匹配，请完整升级后启动。");
+                    BrowserHost.SetReleased(false);
                     new Guard().Run();
                 }
                 return 0;

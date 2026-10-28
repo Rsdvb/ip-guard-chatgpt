@@ -503,7 +503,6 @@ namespace IpGuard {
             } catch(IOException e) { Log("info", "启动连接已关闭 · " + e.Message); }
         }
         public void Run() {
-            BrowserHost.SetReleased(false);
             try { BrowserHost.Register(true); } catch(Exception error) { Log("error","浏览器连接注册失败 · "+error.Message); }
             if(config.apps.Any(t => t.enabled) && SystemPolicy.Admin) {
                 TripAll("守护程序已启动，等待重新校验");

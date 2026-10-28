@@ -260,15 +260,51 @@ try {
   const restored = await backgroundApp.firstWindow();
   await restored.waitForLoadState("networkidle");
   await restored.getByText("IP Guard", { exact: true }).first().waitFor({ state: "visible" });
+  let fullyExited = false;
+  if (process.platform === "win32") {
+    // Only the OS confirmation dialog is answered for this isolated runner.
+    await backgroundApp.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+    });
+    const child = backgroundApp.process();
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    const timer = setTimeout(() => {
+      child.kill();
+    }, 15000);
+    try {
+      await restored
+        .evaluate(async () => {
+          const bridge: unknown = Reflect.get(globalThis, "desktop");
+          if (!bridge || typeof bridge !== "object") throw new Error("Missing desktop bridge");
+          const invoke: unknown = Reflect.get(bridge, "invoke");
+          if (typeof invoke !== "function") throw new Error("Missing quit invocation");
+          return Reflect.apply(invoke, bridge, [{ action: "app:quit" }]);
+        })
+        .catch((error: Error) => {
+          if (!/closed|disposed|terminated/i.test(error.message)) throw error;
+        });
+      await exited;
+      assert.equal(child.exitCode, 0, "Complete exit must stop the guardian and finish normally");
+      fullyExited = true;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   await writeFile(
     "cold-tray-smoke.json",
     JSON.stringify(
-      { platform: process.platform, resources, rendererCountBeforeOpen: 0, reopened: true },
+      {
+        platform: process.platform,
+        resources,
+        rendererCountBeforeOpen: 0,
+        reopened: true,
+        fullyExited,
+      },
       null,
       2,
     ),
   );
 } finally {
-  await backgroundApp.close();
+  if (backgroundApp.process().exitCode === null) await backgroundApp.close();
   await rm(backgroundProfile, { recursive: true, force: true });
 }
