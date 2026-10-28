@@ -20,6 +20,15 @@ namespace IpGuard {
             var successfulLaunch=new LaunchAttempt(); Assert(successfulLaunch.Complete("visible window") && !successfulLaunch.Fail("late error"),"Successful launch must not be overwritten by a stale error");
             bool migrate;
             string desktopRoot=Path.Combine(Path.GetTempPath(),"IP Guard Bootstrap Test");
+            string nativeQueryPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"native",BuildInfo.Version,"IpGuard.Native.exe");
+            using(Process query=Process.Start(new ProcessStartInfo(nativeQueryPath,"admin-status") { UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true,CreateNoWindow=true })) {
+                Assert(query!=null,"Native privilege query must start");
+                if(!query.WaitForExit(5000)) {query.Kill();Assert(false,"Native privilege query must not wait on the guardian mutex or display a dialog");}
+                string output=query.StandardOutput.ReadToEnd();
+                Assert(query.ExitCode==0,"Native privilege query must exit successfully");
+                var metadata=Data.Json().Deserialize<Dictionary<string,object>>(output);
+                Assert(metadata!=null && metadata.ContainsKey("admin") && metadata["admin"] is bool && (bool)metadata["admin"]==SystemPolicy.Admin,"Native privilege query must report the actual Windows token over JSON");
+            }
             string bootstrapNative=Path.Combine(desktopRoot,"resources","native",BuildInfo.Version,"IpGuard.Native.exe");
             Assert(DesktopBootstrap.Executable(bootstrapNative)==Path.Combine(desktopRoot,"IP Guard.exe"),"Elevation must resolve only the installed sibling desktop executable");
             foreach(string invalid in new[] {"IpGuard.Native.exe",Path.Combine(desktopRoot,"resources","native","other-version","IpGuard.Native.exe"),Path.Combine(desktopRoot,"other","native",BuildInfo.Version,"IpGuard.Native.exe"),Path.Combine(desktopRoot,"resources","native",BuildInfo.Version,"Other.exe")}) {

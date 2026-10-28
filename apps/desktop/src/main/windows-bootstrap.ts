@@ -5,10 +5,12 @@ import { app } from "electron";
 import { z } from "zod";
 
 import { nativePath } from "./guardian.ts";
+import { windowsStartupAction } from "./windows-bootstrap-policy.ts";
 
 const run = promisify(execFile);
 export async function ensureWindowsAdministrator() {
-  if (process.platform !== "win32" || !app.isPackaged) return true;
+  const context = { platform: process.platform, packaged: app.isPackaged };
+  if (windowsStartupAction(context) === "continue") return true;
   const result = await run(nativePath(), ["admin-status"], {
     windowsHide: true,
     timeout: 5000,
@@ -16,7 +18,13 @@ export async function ensureWindowsAdministrator() {
     encoding: "utf8",
   });
   const value: unknown = JSON.parse(result.stdout.trim().replace(/^\uFEFF/, ""));
-  if (z.object({ admin: z.boolean() }).parse(value).admin) return true;
+  if (
+    windowsStartupAction({
+      ...context,
+      administrator: z.object({ admin: z.boolean() }).parse(value).admin,
+    }) === "continue"
+  )
+    return true;
   try {
     await run(
       nativePath(),
