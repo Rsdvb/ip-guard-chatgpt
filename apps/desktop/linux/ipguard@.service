@@ -1,0 +1,25 @@
+[Unit]
+Description=IP Guard system protection for user %i
+After=local-fs.target
+Before=graphical.target
+
+[Service]
+Type=notify
+ExecStart=/usr/lib/ipguard/ipguard-system daemon %i
+Restart=on-failure
+RestartSec=1
+KillMode=process
+RuntimeDirectory=ipguard
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+StateDirectory=ipguard
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/ipguard /var/lib/ipguard /sys/fs/bpf /sys/fs/cgroup
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target
