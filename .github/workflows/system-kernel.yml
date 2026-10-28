@@ -28,3 +28,12 @@ jobs:
         with:
           name: ubuntu-kernel-validation
           path: kernel-validation.log
+  mac-policy:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native policy revision regression
+        run: |
+          xcrun swiftc -swift-version 5 -parse-as-library apps/desktop/mac/Policy.swift apps/desktop/mac/PolicyTests.swift -o "$RUNNER_TEMP/mac-policy-tests"
+          "$RUNNER_TEMP/mac-policy-tests"
