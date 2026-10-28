@@ -19,6 +19,12 @@ namespace IpGuard {
             Assert(pendingLaunch.phase=="starting" && pendingLaunch.Fail("activation denied") && !pendingLaunch.Complete("late success"),"Failed launch must be visible and cannot be overwritten by a late completion");
             var successfulLaunch=new LaunchAttempt(); Assert(successfulLaunch.Complete("visible window") && !successfulLaunch.Fail("late error"),"Successful launch must not be overwritten by a stale error");
             bool migrate;
+            string desktopRoot=Path.Combine(Path.GetTempPath(),"IP Guard Bootstrap Test");
+            string bootstrapNative=Path.Combine(desktopRoot,"resources","native",BuildInfo.Version,"IpGuard.Native.exe");
+            Assert(DesktopBootstrap.Executable(bootstrapNative)==Path.Combine(desktopRoot,"IP Guard.exe"),"Elevation must resolve only the installed sibling desktop executable");
+            foreach(string invalid in new[] {"IpGuard.Native.exe",Path.Combine(desktopRoot,"resources","native","other-version","IpGuard.Native.exe"),Path.Combine(desktopRoot,"other","native",BuildInfo.Version,"IpGuard.Native.exe"),Path.Combine(desktopRoot,"resources","native",BuildInfo.Version,"Other.exe")}) {
+                bool rejected=false;try{DesktopBootstrap.Executable(invalid);}catch(Exception){rejected=true;}Assert(rejected,"Invalid elevation layout must not select an arbitrary executable");
+            }
             Config legacy=Data.Parse("{\"settings\":{\"expectedIp\":\"8.8.8.8\",\"intervalSeconds\":2},\"apps\":[],\"rulesLocked\":true,\"ipSource\":\"claude-ai\"}",out migrate);
             Assert(migrate && legacy.services["claude"].rulesLocked && legacy.services["claude"].enabled,"Legacy Claude permission must be preserved");
             Assert(!legacy.services["chatgpt"].rulesLocked && !legacy.services["chatgpt"].enabled,"Legacy Claude rule cannot authorize ChatGPT");

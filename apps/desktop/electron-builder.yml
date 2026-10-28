@@ -24,7 +24,7 @@ win:
     - from: dist/recover.cmd
       to: recover.cmd
   icon: assets/icon.ico
-  requestedExecutionLevel: requireAdministrator
+  requestedExecutionLevel: asInvoker
   target:
     - target: nsis
       arch: [x64]
