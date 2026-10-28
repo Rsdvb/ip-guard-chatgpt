@@ -17,21 +17,22 @@ import { PosixGuardian } from "../src/main/posix-guardian.ts";
 const run = promisify(execFile);
 const root = await realpath(await mkdtemp(path.join(tmpdir(), "ipg-policy-")));
 const responses = { claude: "8.8.8.8", chatgpt: "8.8.4.4" };
+let claudeDelay = 0;
 // Only the external exit-IP endpoint is a fixture. Policy, disk persistence, Unix IPC,
 // launch wrappers, actual OS processes and their termination all run from repository code.
 const server = createServer((request, response) => {
   const service = request.url === "/claude" ? "claude" : "chatgpt";
   response.setHeader("content-type", "application/json");
-  response.end(
-    JSON.stringify({
-      ip: responses[service],
-      error: responses[service] ? "" : "fixture network unavailable",
-      checkedAt: new Date().toISOString(),
-      adapter: "fixture",
-      status: responses[service] ? 200 : 0,
-      ms: 1,
-    }),
-  );
+  const body = JSON.stringify({
+    ip: responses[service],
+    error: responses[service] ? "" : "fixture network unavailable",
+    checkedAt: new Date().toISOString(),
+    adapter: "fixture",
+    status: responses[service] ? 200 : 0,
+    ms: 1,
+  });
+  const timer = setTimeout(() => response.end(body), service === "claude" ? claudeDelay : 0);
+  response.on("close", () => clearTimeout(timer));
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const address = server.address();
@@ -136,6 +137,7 @@ try {
   );
   assert(await running(unrelatedFile));
   responses.chatgpt = "8.8.4.4";
+  claudeDelay = 1000;
   guard = new PosixGuardian(probe, options);
   await guard.start();
   assert.equal(guard.snapshot.services.chatgpt.stopOnProbeFailure, false);
