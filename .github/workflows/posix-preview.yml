@@ -76,6 +76,8 @@ jobs:
           test ! -e /etc/systemd/system/ipguard@.service
       - name: Start packaged Windows desktop and native host
         if: runner.os == 'Windows'
+        env:
+          DEBUG: pw:browser
         shell: bash
         run: node apps/web/tests/platform/desktop-smoke.ts 2>&1 | tee packaged-validation.log
       - name: Start packaged Apple Silicon desktop and native host
