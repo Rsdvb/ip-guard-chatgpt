@@ -5,6 +5,8 @@ import { z } from "zod";
 
 import { browserExtensionId } from "@ip-guard/electron";
 
+import { browserProfiles } from "#src/main/posix-browser.ts";
+
 const preferencesSchema = z.object({
   extensions: z.object({ settings: z.record(z.string(), z.unknown()).optional() }).optional(),
 });
@@ -16,12 +18,17 @@ export async function browserInstallations() {
   const installedBrowsers: ("Chrome" | "Edge")[] = [];
   const errors: string[] = [];
   const local = process.env.LOCALAPPDATA;
-  if (!local) return { installedBrowsers, error: "Windows 用户目录不可用" };
-  for (const browser of [
-    { name: "Chrome", folder: "Google/Chrome/User Data" },
-    { name: "Edge", folder: "Microsoft/Edge/User Data" },
-  ] as const) {
-    const root = path.join(local, browser.folder);
+  if (process.platform === "win32" && !local)
+    return { installedBrowsers, error: "Windows 用户目录不可用" };
+  const roots =
+    process.platform === "win32"
+      ? ([
+          { name: "Chrome", root: path.join(local || "", "Google/Chrome/User Data") },
+          { name: "Edge", root: path.join(local || "", "Microsoft/Edge/User Data") },
+        ] as const)
+      : browserProfiles();
+  for (const browser of roots) {
+    const root = browser.root;
     let installed = false;
     try {
       const profiles = (await readdir(root, { withFileTypes: true })).filter(

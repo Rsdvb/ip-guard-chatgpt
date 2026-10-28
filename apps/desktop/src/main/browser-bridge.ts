@@ -1,3 +1,4 @@
+import { chmod, unlink } from "node:fs/promises";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 
@@ -6,15 +7,19 @@ import type { BrowserState, BrowserPermission, ExtensionStatus, Service } from "
 
 import { browserInstallations } from "#src/main/browser-installation.ts";
 import type { Guardian } from "#src/main/guardian.ts";
+import { fileMissing, preparePosixSocket } from "#src/main/posix-paths.ts";
 
 export class BrowserBridge {
   private server: Server | undefined;
   private clients = new Set<Socket>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private guardian: Guardian;
+  private endpoint = "";
   constructor(guardian: Guardian) {
     this.guardian = guardian;
-    guardian.on("identity", (sid: string) => this.listen(sid));
+    guardian.on("endpoint", (endpoint: string) => {
+      void this.listen(endpoint).catch((error: unknown) => console.error("浏览器连接服务", error));
+    });
     guardian.on("snapshot", () => this.publish());
   }
   private state(): BrowserState {
@@ -50,8 +55,9 @@ export class BrowserBridge {
     };
   }
 
-  private listen(sid: string) {
+  private async listen(endpoint: string) {
     if (this.server) return;
+    if (process.platform !== "win32") await preparePosixSocket(endpoint);
     const server = createServer((socket) => {
       if (this.clients.size >= 16) {
         socket.destroy();
@@ -67,7 +73,14 @@ export class BrowserBridge {
       console.error("浏览器连接服务", error);
       this.close();
     });
-    server.listen(`\\\\.\\pipe\\IPGuard-Browser-${sid}`);
+    this.endpoint = endpoint;
+    server.listen(endpoint, () => {
+      if (process.platform !== "win32")
+        void chmod(endpoint, 0o600).catch((error: unknown) => {
+          console.error(error);
+          this.close();
+        });
+    });
     this.server = server;
     this.timer = setInterval(() => this.publish(), 1000);
   }
@@ -102,7 +115,13 @@ export class BrowserBridge {
     clearInterval(this.timer);
     for (const socket of this.clients) socket.destroy();
     this.clients.clear();
-    this.server?.close();
+    const endpoint = this.endpoint;
+    this.server?.close(() => {
+      if (process.platform !== "win32" && endpoint)
+        void unlink(endpoint).catch((error: unknown) => {
+          if (!fileMissing(error)) console.error(error);
+        });
+    });
     this.server = undefined;
   }
 }

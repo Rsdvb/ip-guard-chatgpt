@@ -5,7 +5,7 @@ export { formatIPText } from "./ip-display.ts";
 export * from "./services.ts";
 export * from "./browser-policy.ts";
 
-export const nativeVersion = "0.12.1";
+export const nativeVersion = "0.13.0";
 export const nativeProtocol = 10;
 export const browserExtensionId = "blmgamidelconfabgilaacbkokomegep";
 export const browserHostName = "com.ipguard.browser";
@@ -156,6 +156,8 @@ export type ServiceSnapshot = z.infer<typeof serviceSnapshotSchema>;
 export const snapshotSchema = z.object({
   online: z.boolean(),
   admin: z.boolean(),
+  platform: z.enum(["win32", "darwin", "linux"]).optional(),
+  processProtection: z.enum(["system", "managed-group", "managed-cgroup"]).optional(),
   nativeVersion: z.literal(nativeVersion),
   services: z.object({ claude: serviceSnapshotSchema, chatgpt: serviceSnapshotSchema }),
   detection: z.string(),
@@ -205,6 +207,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("process:status"), service: serviceSchema }),
   z.object({ action: z.literal("process:stop"), service: serviceSchema }),
   z.object({ action: z.literal("logs") }),
+  z.object({ action: z.literal("launchers") }),
   z.object({ action: z.literal("elevate") }),
   z.object({ action: z.literal("restart") }),
   z.object({ action: z.literal("coffee:status"), service: serviceSchema }),

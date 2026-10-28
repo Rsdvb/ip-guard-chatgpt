@@ -10,6 +10,8 @@ import type { BrowserBridge } from "#src/main/browser-bridge.ts";
 import type { CoffeeDiagnostics } from "#src/main/coffee.ts";
 import type { Guardian } from "#src/main/guardian.ts";
 import { NativeCommandError } from "#src/main/guardian.ts";
+import { posixAutostart } from "#src/main/posix-autostart.ts";
+import { resolvePosixExecutable } from "#src/main/posix-presets.ts";
 import { applicationPresets } from "#src/main/presets.ts";
 import type { ProtectionProbe } from "#src/main/protection-probe.ts";
 import { isTrustedUrl } from "#src/main/renderer-route.ts";
@@ -64,13 +66,14 @@ export const setupIpc = (
       const snapshot = await guardian.request("status");
       if (command.action === "unlock" && !snapshot.services[command.service].rulesLocked)
         return { snapshot };
-      if (!snapshot.admin) throw new Error("请以管理员身份重启 IP Guard");
+      if (process.platform === "win32" && !snapshot.admin)
+        throw new Error("请以管理员身份重启 IP Guard");
       const pause = command.action === "service:enable";
       const answer = await dialog.showMessageBox({
         type: "warning",
         title: pause ? "暂停服务" : "取消 IP 锁定",
         message: `${pause ? "暂停" : "取消锁定并停止"} ${serviceName(command.service)}？`,
-        detail: `只结束该服务的受保护进程树并封锁其连接。${pause ? "保留该服务的锁定地址，可重新启动防护。" : "取消该服务锁定后需重新锁定才能启动。"}另一服务不受影响。请先保存会话。`,
+        detail: `只结束该服务的${process.platform === "win32" ? "受保护进程树并封锁其连接" : "受控进程并阻断其网页；不接管原快捷方式启动的实例"}。${pause ? "保留该服务的锁定地址，可重新启动防护。" : "取消该服务锁定后需重新锁定才能启动。"}另一服务不受影响。请先保存会话。`,
         buttons: ["取消", pause ? "暂停并阻断" : "取消锁定并停止"],
         defaultId: 0,
         cancelId: 0,
@@ -85,28 +88,39 @@ export const setupIpc = (
       };
     }
     if (command.action === "process:status")
-      return { processes: await serviceProcessStatus(command.service) };
+      return {
+        processes:
+          guardian.managedProcessStatus(command.service) ??
+          (await serviceProcessStatus(command.service)),
+      };
     if (command.action === "process:stop") {
       const service = command.service;
       const name = serviceName(service);
       if (stoppingServices.has(service)) throw new Error(`${name} 停止操作正在处理中`);
       stoppingServices.add(service);
       try {
-        const current = await serviceProcessStatus(service);
+        const current =
+          guardian.managedProcessStatus(service) ?? (await serviceProcessStatus(service));
         if (current.phase === "stopped") return { processes: current };
         if (!current.canStop) throw new Error(current.message || `${name} 进程状态暂未确认`);
         const answer = await dialog.showMessageBox({
           type: "warning",
           title: `停止 ${name}`,
           message: `停止 ${name} 进程树？`,
-          detail: `将结束当前登录用户、当前 Windows 会话的 ${name}${service === "claude" ? " CLI、Desktop" : " Desktop"} 及其子进程，包含未添加到防护列表的实例。另一服务不会被选中。未保存的会话可能丢失。`,
+          detail:
+            process.platform === "win32"
+              ? `将结束当前登录用户、当前 Windows 会话的 ${name}${service === "claude" ? " CLI、Desktop" : " Desktop"} 及其子进程，包含未添加到防护列表的实例。另一服务不会被选中。未保存的会话可能丢失。`
+              : `仅停止由 IP Guard 或受控启动器启动的 ${name} 实例。未保存的会话可能丢失。`,
           buttons: ["取消", "停止"],
           defaultId: 0,
           cancelId: 0,
         });
         if (answer.response !== 1)
           return { cancelled: true, processes: await serviceProcessStatus(service) };
-        return { processes: await stopServiceTrees(service) };
+        return {
+          processes:
+            (await guardian.stopManagedService(service)) ?? (await stopServiceTrees(service)),
+        };
       } finally {
         stoppingServices.delete(service);
       }
@@ -128,22 +142,40 @@ export const setupIpc = (
     if (command.action === "pick") {
       const result = await dialog.showOpenDialog({
         title: "选择受保护程序",
-        properties: ["openFile"],
-        filters: [{ name: "Windows 程序", extensions: ["exe"] }],
+        properties: process.platform === "darwin" ? ["openFile", "openDirectory"] : ["openFile"],
+        ...(process.platform === "win32"
+          ? { filters: [{ name: "Windows 程序", extensions: ["exe"] }] }
+          : {}),
       });
-      return result.canceled ? { cancelled: true } : { selectedPath: result.filePaths[0] };
+      const selected = result.filePaths[0];
+      return result.canceled || !selected
+        ? { cancelled: true }
+        : {
+            selectedPath:
+              process.platform === "win32" ? selected : await resolvePosixExecutable(selected),
+          };
+    }
+    if (command.action === "launchers") {
+      if (process.platform === "win32") throw new Error("Windows 版使用原快捷方式启动");
+      const error = await shell.openPath(path.join(app.getPath("userData"), "launchers"));
+      if (error) throw new Error(error);
+      return {};
     }
     if (command.action === "logs") {
       const error = await shell.openPath(
-        path.join(
-          process.env.LOCALAPPDATA ?? path.join(app.getPath("home"), "AppData/Local"),
-          "IPGuard",
-        ),
+        process.platform === "win32"
+          ? path.join(
+              process.env.LOCALAPPDATA ?? path.join(app.getPath("home"), "AppData/Local"),
+              "IPGuard",
+            )
+          : app.getPath("userData"),
       );
       if (error) throw new Error(error);
       return {};
     }
     if (command.action === "elevate") {
+      if (process.platform !== "win32")
+        throw new Error("macOS 和 Ubuntu 测试版以普通用户运行，无需提升界面权限");
       if (!app.isPackaged) throw new Error("开发模式请从管理员终端启动。");
       await guardian.stop();
       app.releaseSingleInstanceLock();
@@ -189,6 +221,8 @@ export const setupIpc = (
     }
     if (command.action === "autostart" && !app.isPackaged)
       throw new Error("请安装打包版本后开启开机启动。");
+    if (command.action === "autostart" && process.platform !== "win32")
+      await posixAutostart(command.enabled);
     const { action, ...payload } = command;
     const nativePayload: Record<string, unknown> = { ...payload };
     if ("id" in payload) {

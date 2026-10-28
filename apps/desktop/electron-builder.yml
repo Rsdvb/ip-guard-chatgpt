@@ -11,15 +11,16 @@ files:
 extraResources:
   - from: ../browser-extension/dist
     to: browser-extension
-  - from: dist/native/${version}
-    to: native/${version}
   - from: assets
     to: assets
-  - from: dist/recover.cmd
-    to: recover.cmd
   - from: dist/release-info.json
     to: release-info.json
 win:
+  extraResources:
+    - from: dist/native/${version}
+      to: native/${version}
+    - from: dist/recover.cmd
+      to: recover.cmd
   icon: assets/icon.ico
   requestedExecutionLevel: requireAdministrator
   target:
@@ -31,3 +32,25 @@ nsis:
   allowToChangeInstallationDirectory: true
   include: scripts/installer.nsh
   artifactName: IP-Guard-Setup-${version}.${ext}
+mac:
+  extraResources: &posixResources
+    - from: posix
+      to: posix
+  identity: "-"
+  hardenedRuntime: true
+  entitlements: assets/entitlements.mac.plist
+  category: public.app-category.utilities
+  target:
+    - target: zip
+      arch: [arm64]
+  artifactName: IP-Guard-${version}-macOS-${arch}.${ext}
+linux:
+  extraResources: *posixResources
+  category: Utility
+  target:
+    - target: deb
+      arch: [x64]
+    - target: tar.gz
+      arch: [x64]
+  artifactName: IP-Guard-${version}-Ubuntu-${arch}.${ext}
+  maintainer: IP Guard Contributors

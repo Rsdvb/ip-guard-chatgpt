@@ -3,6 +3,7 @@ import path from "node:path";
 import { app, BrowserWindow, dialog, Menu, nativeImage, Tray } from "electron";
 
 import { rendererOrigin } from "@ip-guard/electron";
+import type { Snapshot } from "@ip-guard/electron";
 
 import { BrowserBridge } from "#src/main/browser-bridge.ts";
 import { CoffeeDiagnostics } from "#src/main/coffee.ts";
@@ -70,7 +71,9 @@ const updates = new ApplicationUpdates(
   },
 );
 let tray: Tray | undefined;
-const background = process.argv.includes("--background");
+const background =
+  process.argv.includes("--background") ||
+  (process.platform === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin);
 
 const open = () =>
   createMainWindow({
@@ -125,7 +128,10 @@ const start = () => {
           if ((guardian.snapshot?.running.length ?? 0) > 0) {
             const choice = await dialog.showMessageBox({
               type: "warning",
-              message: "退出将结束所有受保护程序，启动拦截会继续保留。",
+              message:
+                process.platform === "win32"
+                  ? "退出将结束所有受保护程序，启动拦截会继续保留。"
+                  : "退出将结束受控启动的程序，网页保持阻断；原快捷方式启动的程序不在防护范围。",
               buttons: ["取消", "退出"],
               defaultId: 0,
               cancelId: 0,
@@ -138,8 +144,14 @@ const start = () => {
     ]),
   );
   tray.on("double-click", show);
-  guardian.on("snapshot", (snapshot) => {
-    tray?.setToolTip(`IP Guard · ${snapshot.ready ? "IPv4 匹配" : snapshot.reason}`.slice(0, 120));
+  guardian.on("snapshot", (snapshot: Snapshot) => {
+    const summary = Object.entries(snapshot.services)
+      .map(
+        ([key, rule]) =>
+          `${key === "claude" ? "Claude" : "ChatGPT"} ${rule.ready ? "匹配" : rule.reason || "待锁定"}`,
+      )
+      .join(" · ");
+    tray?.setToolTip(`IP Guard · ${summary}`.slice(0, 120));
   });
 };
 

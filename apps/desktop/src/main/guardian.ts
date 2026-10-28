@@ -12,6 +12,7 @@ import { nativeProtocol, nativeVersion, snapshotSchema, serviceSchema } from "@i
 import type { Service } from "@ip-guard/electron";
 
 import type { ProbeProgress } from "#src/main/exit-ip.ts";
+import { PosixGuardian } from "#src/main/posix-guardian.ts";
 import type { ProtectionProbe } from "#src/main/protection-probe.ts";
 
 const messageSchema = z.object({
@@ -52,6 +53,7 @@ export class Guardian extends EventEmitter {
   private rejectReady: ((error: Error) => void) | undefined;
   private helloTimer: ReturnType<typeof setTimeout> | undefined;
   private child: ReturnType<typeof spawn> | undefined;
+  private posix: PosixGuardian | undefined;
   private stopping = false;
   get isStopping() {
     return this.stopping;
@@ -81,7 +83,30 @@ export class Guardian extends EventEmitter {
     });
     void this.ready.catch(() => undefined);
     if (process.platform !== "win32") {
-      this.fail("请在 Windows 10/11 上运行桌面程序。");
+      const posix = new PosixGuardian(this.probeService, {
+        directory: app.getPath("userData"),
+        executable: process.env.APPIMAGE || process.execPath,
+        resources: app.isPackaged
+          ? path.join(process.resourcesPath, "posix")
+          : path.resolve(import.meta.dirname, "../../posix"),
+      });
+      this.posix = posix;
+      posix.on("endpoint", (endpoint: string) => this.emit("endpoint", endpoint));
+      posix.on("snapshot", (snapshot: Snapshot) => {
+        this.snapshot = snapshot;
+        this.emit("snapshot", snapshot);
+      });
+      posix.on("failure", (reason: string) => this.fail(reason));
+      void posix
+        .start()
+        .then(() => {
+          this.resolveReady?.();
+          this.resolveReady = undefined;
+          this.rejectReady = undefined;
+        })
+        .catch((error: unknown) =>
+          this.fail(error instanceof Error ? error.message : "守护启动失败"),
+        );
       return;
     }
     if (!existsSync(nativePath())) {
@@ -109,7 +134,7 @@ export class Guardian extends EventEmitter {
               );
               return;
             }
-            this.emit("identity", message.sid);
+            this.emit("endpoint", `\\\\.\\pipe\\IPGuard-Browser-${message.sid}`);
             this.send({ action: "initialize", version: nativeVersion, protocol: nativeProtocol });
             return;
           }
@@ -208,6 +233,7 @@ export class Guardian extends EventEmitter {
   }
   private fail(message: string) {
     this.error = message;
+    if (this.posix) void this.posix.stop();
     clearTimeout(this.helloTimer);
     this.rejectReady?.(new Error(message));
     this.resolveReady = undefined;
@@ -249,6 +275,7 @@ export class Guardian extends EventEmitter {
   }
   async request(action: string, payload: Record<string, unknown> = {}): Promise<Snapshot> {
     await this.ready;
+    if (this.posix) return this.posix.request(action, payload);
     const input = this.child?.stdin;
     if (!input || this.error || !input.writable)
       return Promise.reject(new Error(this.error || "守护程序尚未就绪"));
@@ -269,6 +296,12 @@ export class Guardian extends EventEmitter {
     });
   }
   async stop() {
+    if (this.posix) {
+      this.stopping = true;
+      await this.posix.stop();
+      this.posix = undefined;
+      return;
+    }
     if (!this.child) return;
     const child = this.child;
     if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
@@ -282,5 +315,11 @@ export class Guardian extends EventEmitter {
     const timer = setTimeout(() => child.kill(), 8000);
     await exited;
     clearTimeout(timer);
+  }
+  managedProcessStatus(service: Service) {
+    return this.posix?.processStatus(service);
+  }
+  stopManagedService(service: Service) {
+    return this.posix?.stopService(service);
   }
 }

@@ -10,8 +10,19 @@ import {
   services,
 } from "@ip-guard/electron";
 
-if (process.platform !== "win32") throw new Error("Native guardian requires Windows.");
 const root = path.resolve(import.meta.dirname, "..");
+if (process.platform !== "win32") {
+  if (process.platform !== "darwin" && process.platform !== "linux")
+    throw new Error("Unsupported desktop platform");
+  for (const filename of ["managed-run.mjs", "native-host.mjs"]) {
+    const checked = spawnSync(process.execPath, ["--check", path.join(root, "posix", filename)], {
+      stdio: "inherit",
+    });
+    if (checked.status !== 0) throw new Error(`Invalid POSIX runtime: ${filename}`);
+  }
+  console.log("POSIX guardian and Native Messaging runtime ready");
+  process.exit(0);
+}
 const metadata: unknown = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 if (!metadata || typeof metadata !== "object" || Reflect.get(metadata, "version") !== nativeVersion)
   throw new Error("Desktop and native component versions must match.");

@@ -29,6 +29,10 @@ export class ProtectionAlerts {
     });
   }
   private show(notice: ProtectionNotice) {
+    if (process.platform !== "win32") {
+      void this.fallback(notice);
+      return;
+    }
     let viewer = this.viewer;
     if (!viewer || viewer.child.exitCode !== null || !viewer.child.stdin?.writable) {
       const child = spawn(nativePath(), ["notice"], {

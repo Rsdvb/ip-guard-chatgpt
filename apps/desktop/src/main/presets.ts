@@ -10,6 +10,7 @@ import type { AppPreset } from "@ip-guard/electron";
 
 import { isChatgptEntry } from "#src/main/chatgpt-package.ts";
 import { discoveryScript } from "#src/main/discovery-script.ts";
+import { posixPresets } from "#src/main/posix-presets.ts";
 
 const run = promisify(execFile);
 const metadataSchema = z.object({
@@ -197,7 +198,7 @@ async function discover(): Promise<AppPreset[]> {
 }
 let pending: Promise<AppPreset[]> | undefined;
 export function applicationPresets(): Promise<AppPreset[]> {
-  pending ??= discover().finally(() => {
+  pending ??= (process.platform === "win32" ? discover() : posixPresets()).finally(() => {
     pending = undefined;
   });
   return pending;

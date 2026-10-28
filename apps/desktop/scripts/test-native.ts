@@ -2,8 +2,14 @@ import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import path from "node:path";
 
-if (process.platform !== "win32") throw new Error("Native policy tests require Windows.");
 const root = path.resolve(import.meta.dirname, "..");
+if (process.platform !== "win32") {
+  const result = spawnSync(process.execPath, [path.join(root, "scripts/test-posix.ts")], {
+    stdio: "inherit",
+  });
+  if (result.error) throw result.error;
+  process.exit(result.status ?? 1);
+}
 const binary = path.join(root, "dist/NativePolicyTests.exe");
 const result = spawnSync(
   path.join(process.env.WINDIR ?? "C:\\Windows", "Microsoft.NET/Framework64/v4.0.30319/csc.exe"),

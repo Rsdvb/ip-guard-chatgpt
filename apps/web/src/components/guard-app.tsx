@@ -333,6 +333,7 @@ function RuleForm({
 }
 function AddDialog({
   apps,
+  managed,
   busy,
   canAdd,
   onClose,
@@ -340,6 +341,7 @@ function AddDialog({
   onPick,
 }: {
   apps: ProtectedApp[];
+  managed: boolean;
   busy: boolean;
   canAdd: boolean;
   onClose: () => void;
@@ -358,9 +360,11 @@ function AddDialog({
   const [selected, setSelected] = useState("");
   const alreadyAdded = (value: string) =>
     Boolean(value) &&
-    apps.some(
-      (app) =>
-        app.path.replaceAll("/", "\\").toLowerCase() === value.replaceAll("/", "\\").toLowerCase(),
+    apps.some((app) =>
+      managed
+        ? app.path === value
+        : app.path.replaceAll("/", "\\").toLowerCase() ===
+          value.replaceAll("/", "\\").toLowerCase(),
     );
   const duplicate = alreadyAdded(path);
   useEffect(() => {
@@ -391,7 +395,7 @@ function AddDialog({
     const selected = await onPick();
     if (selected) {
       setPath(selected);
-      setService(/(?:^|[\\/])chatgpt\.exe$/i.test(selected) ? "chatgpt" : "claude");
+      setService(/(?:^|[\\/])chatgpt(?:\.exe)?$/i.test(selected) ? "chatgpt" : "claude");
       setSelected("");
       setName(
         selected
@@ -499,7 +503,7 @@ function AddDialog({
                 value={path}
                 title={path}
                 readOnly
-                placeholder="选择 .exe 文件"
+                placeholder={managed ? "选择可执行文件；macOS 可选择 .app" : "选择 .exe 文件"}
                 required
               />
               <button type="button" className="btn" onClick={() => void pick()} disabled={busy}>
@@ -644,7 +648,7 @@ export function GuardApp() {
   }, [bridge]);
   const invoke = async (command: Command) => {
     if (!bridge) {
-      toast.error("请在 Windows 桌面版中执行此操作");
+      toast.error("请在 IP Guard 桌面版中执行此操作");
       return undefined;
     }
     setBusy(true);
@@ -665,7 +669,8 @@ export function GuardApp() {
   const rule = snapshot.services[selectedService];
   const locked = rule.rulesLocked;
   const offline = Boolean(bridge && !loading && (!snapshot.online || failure));
-  const available = Boolean(bridge && snapshot.online && snapshot.admin && !failure);
+  const managed = snapshot.platform === "darwin" || snapshot.platform === "linux";
+  const available = Boolean(bridge && snapshot.online && (snapshot.admin || managed) && !failure);
   const enabledCount = snapshot.apps.filter((a) => a.enabled).length;
   const status = loading
     ? "连接守护程序"
@@ -755,12 +760,12 @@ export function GuardApp() {
             const targetRule = snapshot.services[target.service];
             const targetLocked = targetRule.rulesLocked && targetRule.enabled;
             const actionReason = !bridge
-              ? "请在 Windows 桌面版操作"
+              ? "请在 IP Guard 桌面版操作"
               : loading
                 ? "等待守护程序连接"
                 : offline
                   ? "请重启守护程序"
-                  : !snapshot.admin
+                  : !snapshot.admin && !managed
                     ? "请以管理员身份重启"
                     : !running && !targetRule.rulesLocked
                       ? "先锁定该服务允许的公网 IPv4"
@@ -925,7 +930,15 @@ export function GuardApp() {
           <div className="sidebar-divider" />
           <div className="sidebar-footer">
             <span className={`tiny-dot ${available ? "good" : ""}`} />
-            <span>{bridge ? (snapshot.admin ? "管理员模式" : "普通权限") : "浏览器预览"}</span>
+            <span>
+              {bridge
+                ? managed
+                  ? "受控启动测试版"
+                  : snapshot.admin
+                    ? "管理员模式"
+                    : "普通权限"
+                : "浏览器预览"}
+            </span>
             <span
               className="version"
               title={`原生组件 ${snapshot.online ? snapshot.nativeVersion : "未连接"}`}
@@ -972,7 +985,7 @@ export function GuardApp() {
               {serviceName(selectedService)} · {status}
             </div>
           </div>
-          {(!bridge || offline || (bridge && !snapshot.admin && !loading)) && (
+          {(!bridge || offline || (bridge && !snapshot.admin && !managed && !loading)) && (
             <div className="notice" role="alert">
               <ShieldOff size={18} />
               <span>
@@ -980,7 +993,7 @@ export function GuardApp() {
                   failure ||
                     (offline ? rule.reason || "守护程序离线，请重启 IP Guard。" : "") ||
                     (!bridge
-                      ? "请打开 Windows 桌面版以配置启动拦截与后台防护。"
+                      ? "请打开 IP Guard 桌面版以配置后台防护。"
                       : "管理启动拦截与防火墙需要管理员权限。"),
                   ipsVisible,
                 )}
@@ -996,7 +1009,8 @@ export function GuardApp() {
                 </button>
               ) : (
                 bridge &&
-                !snapshot.admin && (
+                !snapshot.admin &&
+                !managed && (
                   <button
                     className="text-btn"
                     disabled={busy}
@@ -1007,6 +1021,27 @@ export function GuardApp() {
                   </button>
                 )
               )}
+            </div>
+          )}
+          {managed && (
+            <div className="notice" role="note">
+              <Shield size={18} />
+              <span>
+                {snapshot.platform === "darwin" ? "macOS" : "Ubuntu"}{" "}
+                测试版：网页由插件独立阻断。应用仅保护通过 IP Guard
+                或受控启动器启动的实例；原快捷方式不被接管，未提供系统级网络过滤。
+                {snapshot.processProtection === "managed-cgroup"
+                  ? "进程由 systemd 控制组管理。"
+                  : "进程按受控进程组管理，另建会话的子进程可能脱离此范围。"}
+              </span>
+              <button
+                className="text-btn"
+                disabled={busy || !snapshot.apps.some((target) => target.enabled)}
+                onClick={() => void invoke({ action: "launchers" })}
+              >
+                受控启动器
+                <FolderOpen size={15} />
+              </button>
             </div>
           )}
           {(page === "overview" || page === "settings") && (
@@ -1324,7 +1359,7 @@ export function GuardApp() {
                     </span>
                     <label id="autostart-label">
                       <strong>开机启动</strong>
-                      <span>登录 Windows 后启动，直接进入托盘</span>
+                      <span>登录系统后启动，直接进入托盘</span>
                     </label>
                     <Toggle
                       checked={snapshot.autostart}
@@ -1409,7 +1444,8 @@ export function GuardApp() {
               本机运行
             </span>
             <span>
-              {enabledCount} 个程序已接管<span className="footer-separator">/</span>
+              {enabledCount} 个程序{managed ? "已开启受控启动" : "已接管"}
+              <span className="footer-separator">/</span>
               {snapshot.running.length} 个运行中
             </span>
           </footer>
@@ -1434,6 +1470,7 @@ export function GuardApp() {
       {adding && (
         <AddDialog
           apps={snapshot.apps}
+          managed={managed}
           busy={busy}
           canAdd={available}
           onClose={() => setAdding(false)}
@@ -1442,7 +1479,9 @@ export function GuardApp() {
             const result = await invoke({ action: "add", app: target });
             if (result?.snapshot) {
               setAdding(false);
-              toast.success("已添加，开启开关后接管启动");
+              toast.success(
+                managed ? "已添加，开启开关后可受控启动" : "已添加，开启开关后接管启动",
+              );
             }
           }}
         />
