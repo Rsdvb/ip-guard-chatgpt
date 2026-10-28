@@ -34,10 +34,12 @@ final class ProcessMonitor {
         guard pid > 1, pid != getpid() else { return nil }
         var info = proc_bsdinfo()
         guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size)) == Int32(MemoryLayout<proc_bsdinfo>.size), info.pbi_uid == getuid() else { return nil }
+        // sys/proc.h marks an exited process awaiting its parent as SZOMB (5).
+        guard info.pbi_status != 5 else { return nil }
         // Darwin exposes MAXPATHLEN to Swift, but not the proc-info expression macro.
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         let count = proc_pidpath(pid, &buffer, UInt32(buffer.count))
-        if count > 0 { return ProcessRecord(pid: pid, path: String(cString: buffer), seconds: info.pbi_start_tvsec, micros: info.pbi_start_tvusec) }
+        if count > 0 { return ProcessRecord(pid: pid, path: URL(fileURLWithPath:String(cString: buffer)).standardizedFileURL.path, seconds: info.pbi_start_tvsec, micros: info.pbi_start_tvusec) }
         if let old = previous, old.seconds == info.pbi_start_tvsec, old.micros == info.pbi_start_tvusec { return old }
         return nil
     }
@@ -57,7 +59,7 @@ final class ProcessMonitor {
         if fd >= 0 {
             defer { close(fd) }
             var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
-            if fcntl(fd, F_GETPATH, &buffer) == 0 { return String(cString: buffer) }
+            if fcntl(fd, F_GETPATH, &buffer) == 0 { return URL(fileURLWithPath:String(cString: buffer)).standardizedFileURL.path }
         }
         return URL(fileURLWithPath: file).resolvingSymlinksInPath().path
     }

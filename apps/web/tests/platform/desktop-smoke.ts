@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, realpath, readFile, unlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,13 +9,14 @@ import { _electron } from "@playwright/test";
 
 import {
   browserExtensionId,
+  browserHostName,
   browserStateSchema,
   nativeVersion,
   snapshotSchema,
   replySchema,
 } from "@ip-guard/electron";
 
-import { registerPosixBrowser } from "../../../desktop/src/main/posix-browser.ts";
+import { browserProfiles, registerPosixBrowser } from "../../../desktop/src/main/posix-browser.ts";
 import { sampleResources } from "./resource-sample.ts";
 
 if (process.platform === "win32" && process.env.GITHUB_ACTIONS !== "true")
@@ -210,6 +211,22 @@ try {
   nativeHost?.stdin?.end();
   nativeHost?.kill();
   await application.close();
+  if (process.platform !== "win32")
+    for (const browser of browserProfiles()) {
+      const file = path.join(browser.root, "NativeMessagingHosts", `${browserHostName}.json`);
+      try {
+        const value: unknown = JSON.parse(await readFile(file, "utf8"));
+        if (
+          value &&
+          typeof value === "object" &&
+          Reflect.get(value, "path") === path.join(profile, "browser/ipguard-native-host")
+        )
+          await unlink(file);
+      } catch (error) {
+        if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT")
+          throw error;
+      }
+    }
   // This private directory was created by mkdtemp for this smoke test only.
   await rm(profile, { recursive: true, force: true });
 }

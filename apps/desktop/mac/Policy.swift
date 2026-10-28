@@ -21,12 +21,11 @@ struct FilterTarget: Codable, Equatable {
     func validate() throws {
         guard UUID(uuidString: id) != nil, ["claude", "chatgpt"].contains(service), paths.count <= 17 else { throw PolicyError.invalid }
         for value in paths {
-            guard value.hasPrefix("/"), value.utf8.count <= 4096, !value.contains("\0"),
-                  URL(fileURLWithPath: value).standardizedFileURL.path == value else { throw PolicyError.invalid }
+            guard value.hasPrefix("/"), value.utf8.count <= 4096, !value.contains("\0"), !value.contains("\n"), !value.contains("\r"),
+                  !value.contains("//"), !value.hasSuffix("/"), !value.split(separator:"/").contains(where: { $0 == "." || $0 == ".." }) else { throw PolicyError.invalid }
         }
         if let root = bundleRoot {
-            guard root.hasSuffix(".app"), executable.hasPrefix(root + "/Contents/"),
-                  URL(fileURLWithPath: root).standardizedFileURL.path == root else { throw PolicyError.invalid }
+            guard root.hasSuffix(".app"), executable.hasPrefix(root + "/Contents/") else { throw PolicyError.invalid }
         }
         if let name = bundleIdentifier {
             guard name.count <= 255, name.range(of: "^[A-Za-z0-9][A-Za-z0-9.-]*$", options: .regularExpression) != nil else { throw PolicyError.invalid }
