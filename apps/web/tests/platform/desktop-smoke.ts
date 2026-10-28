@@ -223,8 +223,10 @@ try {
         )
           await unlink(file);
       } catch (error) {
-        if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT")
-          throw error;
+        if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") {
+          console.error("Smoke-owned browser registration cleanup failed", error);
+          process.exitCode = 1;
+        }
       }
     }
   // This private directory was created by mkdtemp for this smoke test only.

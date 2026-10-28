@@ -4,11 +4,14 @@ import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
 if (process.platform !== "win32") {
-  const result = spawnSync(process.execPath, [path.join(root, "scripts/test-posix.ts")], {
-    stdio: "inherit",
-  });
-  if (result.error) throw result.error;
-  process.exit(result.status ?? 1);
+  for (const file of ["test-posix-presets.ts", "test-posix.ts"]) {
+    const result = spawnSync(process.execPath, [path.join(root, "scripts", file)], {
+      stdio: "inherit",
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) process.exit(result.status ?? 1);
+  }
+  process.exit(0);
 }
 const binary = path.join(root, "dist/NativePolicyTests.exe");
 const result = spawnSync(

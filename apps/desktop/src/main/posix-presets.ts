@@ -25,7 +25,7 @@ export async function resolvePosixExecutable(filename: string) {
   const file = await realpath(executable);
   if (!(await stat(file)).isFile()) throw new Error("请选择实际可执行文件，macOS 也可选择 .app");
   await access(file, constants.X_OK);
-  return file;
+  return path.resolve(executable);
 }
 async function first(files: string[]) {
   for (const file of files) {

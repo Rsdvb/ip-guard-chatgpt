@@ -714,7 +714,16 @@ export class PosixGuardian extends EventEmitter {
         )
       )
         throw new Error("该程序已添加");
-      await this.executable(command.app.path);
+      const selected = await stat(await this.executable(command.app.path));
+      for (const target of this.config.apps) {
+        try {
+          const existing = await stat(target.path);
+          if (existing.dev === selected.dev && existing.ino === selected.ino)
+            throw new Error("该程序已通过另一入口添加，不能重复分配独立规则");
+        } catch (error) {
+          if (!fileMissing(error)) throw error;
+        }
+      }
       parsePosixArguments(command.app.arguments);
       if (command.app.enabled && !this.snapshot.services[command.app.service].rulesLocked)
         throw new Error("请先锁定该服务 IP");

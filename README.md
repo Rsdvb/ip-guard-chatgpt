@@ -6,13 +6,13 @@
 
 公网 IPv4 防护工具。为 Claude 和 ChatGPT 分别锁定允许的服务出口 IPv4，在应用启动前校验，运行期间持续监测；地址异常时结束受控进程。配套 Chrome / Edge 扩展保护相应服务的网页。
 
-基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`。Windows 稳定版为 **0.12.1**；新增 **0.13.0 Apple 芯片 Mac / Ubuntu 24.04 测试版**，支持独立 IP、网页防护和受控启动。Mac 可选系统过滤需签名、公证和授权。安装与范围见 [跨平台说明](CROSS_PLATFORM.zh.md)。本地构建未绑定自动更新源。
+基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`，相关修复已核对至 `f7c5d7fc9cc821fa79c29efa337675f965ee484a`。**0.14.0 三平台测试版**补充 Ubuntu 系统启动 / 网络防护、Mac 原生过滤与进程联动，并减少托盘后台工作。Mac 系统过滤仍需最后完成签名、公证和授权。稳定版为 **0.12.1**；安装与能力范围见 [跨平台说明](CROSS_PLATFORM.zh.md)。
 
 验证情况：单元、浏览器端到端、Windows 原生规则和 POSIX 进程测试覆盖独立授权、暂停、配置迁移和并行检测。真实账户、TUN / VPN、睡眠唤醒、升级卸载及已授权 Mac 系统过滤仍需目标机器验证。Windows 包未签名；Mac 测试包采用 ad-hoc 签名，尚未以 Developer ID 公证。
 
-原 Windows 发布工作流保留在 `ci-templates/release.yml`，默认不启用。新增手动跨平台 CI `.github/workflows/posix-preview.yml`，验证 macOS arm64 / Ubuntu 24.04，不自动发布。原始历史可在上述上游提交查看。
+原 Windows 发布工作流保留在 `ci-templates/release.yml`。手动 CI `.github/workflows/posix-preview.yml` 检查三个平台、安装包与托盘资源；`.github/workflows/system-kernel.yml` 验证 Ubuntu 实际内核过滤和 Mac 原生组件，不自动发布。
 
-**[Windows 稳定版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/latest)** · **[Mac / Ubuntu 测试版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.13.0)** · [快速开始](#快速开始) · [浏览器扩展](#浏览器扩展) · [开发构建](#开发构建) · [更新日志](CHANGELOG.zh.md) · [问题反馈](https://github.com/Rsdvb/ip-guard-chatgpt/issues)
+**[Windows 稳定版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/latest)** · **[三平台测试版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.14.0)** · [快速开始](#快速开始) · [浏览器扩展](#浏览器扩展) · [开发构建](#开发构建) · [更新日志](CHANGELOG.zh.md) · [问题反馈](https://github.com/Rsdvb/ip-guard-chatgpt/issues)
 
 ## 功能特性
 
@@ -198,7 +198,7 @@ Claude / ChatGPT Desktop 更新后可能更换 MSIX 版本目录。更新前解�
 
 技术栈为 TypeScript、React、Electron 与 C#，使用 Vite+ 统一构建工具链。Win32 使用路径级 IFEO，MSIX 保留包身份；Job 与租约管理目标进程树。
 
-构建环境：Windows x64、Node.js 24.22.1、pnpm 12.15.0，以及 Windows 自带的 .NET Framework 4.x 编译器。
+构建环境：Node.js 24.22.1、pnpm 12.15.0。Windows 使用自带 .NET Framework 4.x 编译器；Mac 在 Apple 芯片机器上使用 Xcode Swift 工具链；Ubuntu 需要 Go 1.27.3。原生安装包在对应系统构建。
 
 ```powershell
 git clone https://github.com/Rsdvb/ip-guard-chatgpt.git

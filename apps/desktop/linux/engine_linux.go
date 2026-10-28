@@ -151,10 +151,20 @@ func (e *engine) configure(p Policy, save bool) error {
 	data, _ := json.Marshal(bound)
 	changed := !bytes.Equal(data, e.bindings)
 	if changed {
+		inodes := map[[2]uint64]bool{}
 		for _, t := range p.Targets {
 			if err := validateExecutable(t, e.uid); err != nil {
 				return fmt.Errorf("%s: %w", t.Executable, err)
 			}
+			var info unix.Stat_t
+			if err := unix.Stat(t.Executable, &info); err != nil {
+				return err
+			}
+			key := [2]uint64{uint64(info.Dev), info.Ino}
+			if inodes[key] {
+				return errors.New("同一程序不能通过不同入口重复登记独立规则")
+			}
+			inodes[key] = true
 		}
 		if err := ensureBPFFS(); err != nil {
 			return fmt.Errorf("BPF filesystem: %w", err)
