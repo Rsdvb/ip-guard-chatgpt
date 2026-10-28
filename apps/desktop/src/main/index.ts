@@ -106,7 +106,7 @@ async function runDesktop() {
       });
       if (answer.response !== 1) return false;
       if (systemProtection.active) await systemProtection.setEnabled(false);
-      await guardian.request("release-protection");
+      await guardian.releaseProtection();
       await browserBridge.release();
       app.quit();
       return true;

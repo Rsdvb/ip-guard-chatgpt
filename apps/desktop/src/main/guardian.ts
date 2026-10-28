@@ -55,8 +55,9 @@ export class Guardian extends EventEmitter {
   private child: ReturnType<typeof spawn> | undefined;
   private posix: PosixGuardian | undefined;
   private stopping = false;
+  private releasing = false;
   get isStopping() {
-    return this.stopping;
+    return this.stopping || this.releasing;
   }
   private stderr = "";
   private pending = new Map<
@@ -76,6 +77,7 @@ export class Guardian extends EventEmitter {
   start() {
     this.error = "";
     this.stopping = false;
+    this.releasing = false;
     this.stderr = "";
     this.ready = new Promise<void>((resolve, reject) => {
       this.resolveReady = resolve;
@@ -294,6 +296,15 @@ export class Guardian extends EventEmitter {
         }
       });
     });
+  }
+  async releaseProtection() {
+    this.releasing = true;
+    try {
+      return await this.request("release-protection");
+    } catch (error) {
+      this.releasing = false;
+      throw error;
+    }
   }
   async stop() {
     if (this.posix) {
