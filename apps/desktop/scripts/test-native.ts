@@ -40,3 +40,16 @@ if (result.status !== 0) process.exit(result.status ?? 1);
 const tested = spawnSync(binary, [], { stdio: "inherit" });
 if (tested.error) throw tested.error;
 process.exitCode = tested.status ?? 1;
+if (
+  process.exitCode === 0 &&
+  process.env.GITHUB_ACTIONS === "true" &&
+  process.env.RUNNER_ENVIRONMENT === "github-hosted"
+) {
+  const upgrade = spawnSync(
+    process.execPath,
+    [path.join(root, "scripts/test-package-upgrade.ts")],
+    { stdio: "inherit" },
+  );
+  if (upgrade.error) throw upgrade.error;
+  process.exitCode = upgrade.status ?? 1;
+}

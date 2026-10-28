@@ -8,6 +8,12 @@ namespace IpGuard {
         static void Assert(bool condition,string message) { if(!condition) throw new Exception(message); }
         static void Reject(string source) { bool rejected=false; try { bool migrate; Data.Parse(source,out migrate); } catch(Exception) { rejected=true; } Assert(rejected,"Invalid persisted config must fail closed"); }
         public static int Main(string[] args) {
+            if(args.Length==3 && args[0]=="--resolve-upgraded-package") {
+                string resolved=PackagePolicy.ResolveInstalledPath(args[1]);
+                Assert(String.Equals(resolved,args[2],StringComparison.OrdinalIgnoreCase),"An upgraded app must resolve to the current user's registered package, preserving the executable entry");
+                Assert(PackagePolicy.Find(resolved)!=null,"Resolved entry must retain a registered package identity");
+                Console.WriteLine("PASS: upgraded package resolves to its registered executable."); return 0;
+            }
             if(args.Length==2 && args[0]=="--inspect-package") {
                 var package=PackagePolicy.Find(args[1]); Assert(package!=null,"Registered package must be found");
                 Console.WriteLine(Data.Json().Serialize(new { package=package.fullName,appUserModelId=package.appUserModelId,isConsole=TerminalProcess.IsConsole(args[1]) })); return 0;

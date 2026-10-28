@@ -6,13 +6,13 @@
 
 公网 IPv4 防护工具。为 Claude 和 ChatGPT 分别锁定允许的服务出口 IPv4，在应用启动前校验，运行期间持续监测；地址异常时结束受控进程。配套 Chrome / Edge 扩展保护相应服务的网页。
 
-基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`，相关修复已核对至 `f7c5d7fc9cc821fa79c29efa337675f965ee484a`。**0.14.0 三平台测试版**补充 Ubuntu 系统启动 / 网络防护、Mac 原生过滤与进程联动，并减少托盘后台工作。Mac 系统过滤仍需最后完成签名、公证和授权。稳定版为 **0.12.1**；安装与能力范围见 [跨平台说明](CROSS_PLATFORM.zh.md)。
+基于 [chxcodepro/ip-guard](https://github.com/chxcodepro/ip-guard) 的提交 `e6a9a499beb827f6b2ff186351abc2ee5bcb68ca`，相关修复已核对至 `f7c5d7fc9cc821fa79c29efa337675f965ee484a`。**0.14.1 Windows 修复版**解决桌面客户端升级后旧 EXE 路径导致守护离线的问题；启动时、每分钟及启动程序前按当前用户注册的包身份恢复入口，单个失效项明确显示防护异常，保留两个服务的 IP 规则。**0.14.0 三平台测试版**补充 Ubuntu 系统启动 / 网络防护、Mac 原生过滤与进程联动，并减少托盘后台工作。Mac 系统过滤仍需最后完成签名、公证和授权。稳定版为 **0.12.1**；安装与能力范围见 [跨平台说明](CROSS_PLATFORM.zh.md)。
 
 验证情况：单元、浏览器端到端、Windows 原生规则和 POSIX 进程测试覆盖独立授权、暂停、配置迁移和并行检测。真实账户、TUN / VPN、睡眠唤醒、升级卸载及已授权 Mac 系统过滤仍需目标机器验证。Windows 包未签名；Mac 测试包采用 ad-hoc 签名，尚未以 Developer ID 公证。
 
 原 Windows 发布工作流保留在 `ci-templates/release.yml`。手动 CI `.github/workflows/posix-preview.yml` 检查三个平台、安装包与托盘资源；`.github/workflows/system-kernel.yml` 验证 Ubuntu 实际内核过滤和 Mac 原生组件，不自动发布。
 
-**[Windows 稳定版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/latest)** · **[三平台测试版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.14.0)** · [快速开始](#快速开始) · [浏览器扩展](#浏览器扩展) · [开发构建](#开发构建) · [更新日志](CHANGELOG.zh.md) · [问题反馈](https://github.com/Rsdvb/ip-guard-chatgpt/issues)
+**[Windows 稳定版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/latest)** · **[Windows 最新修复版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.14.1)** · **[三平台测试版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.14.0)** · [快速开始](#快速开始) · [浏览器扩展](#浏览器扩展) · [开发构建](#开发构建) · [更新日志](CHANGELOG.zh.md) · [问题反馈](https://github.com/Rsdvb/ip-guard-chatgpt/issues)
 
 ## 功能特性
 

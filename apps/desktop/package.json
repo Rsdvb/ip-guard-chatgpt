@@ -1,6 +1,6 @@
 {
   "name": "@ip-guard/desktop",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "private": true,
   "description": "Independent Claude and ChatGPT IPv4 application and browser protection",
   "homepage": "https://github.com/Rsdvb/ip-guard-chatgpt",

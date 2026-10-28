@@ -6,7 +6,7 @@ export * from "./services.ts";
 export * from "./browser-policy.ts";
 export * from "./extension-version.ts";
 
-export const nativeVersion = "0.14.0";
+export const nativeVersion = "0.14.1";
 export const nativeProtocol = 10;
 export const browserExtensionId = "blmgamidelconfabgilaacbkokomegep";
 export const browserHostName = "com.ipguard.browser";
@@ -140,6 +140,7 @@ export const settingsSchema = z.object({
   intervalSeconds: z.number().int().min(1).max(60),
 });
 export const appSchema = z.object({
+  protectionError: z.string().max(8192).optional(),
   service: serviceSchema,
   id: z.uuid(),
   name: z.string().min(1).max(100),

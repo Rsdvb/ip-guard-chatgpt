@@ -768,13 +768,15 @@ export function GuardApp() {
                   ? "请重启守护程序"
                   : !snapshot.admin && !managed
                     ? "请以管理员身份重启"
-                    : !running && !targetRule.rulesLocked
-                      ? "先锁定该服务允许的公网 IPv4"
-                      : !running && !targetRule.enabled
-                        ? "先启动该服务防护"
-                        : !running && !target.enabled
-                          ? "先开启右侧防护开关"
-                          : "";
+                    : !running && target.protectionError
+                      ? target.protectionError
+                      : !running && !targetRule.rulesLocked
+                        ? "先锁定该服务允许的公网 IPv4"
+                        : !running && !targetRule.enabled
+                          ? "先启动该服务防护"
+                          : !running && !target.enabled
+                            ? "先开启右侧防护开关"
+                            : "";
             return (
               <article className="app-row" key={target.id}>
                 <div className={`app-glyph ${running ? "running" : ""}`}>
@@ -784,19 +786,21 @@ export function GuardApp() {
                   <h3>
                     {target.name} <small>{serviceName(target.service)}</small>
                     <span className={`small-status ${running ? "good" : ""}`}>
-                      {starting
-                        ? "启动中"
-                        : running
-                          ? "运行中"
-                          : target.enabled
-                            ? !targetRule.rulesLocked
-                              ? "待锁定"
-                              : !targetRule.enabled
-                                ? "已暂停"
-                                : targetRule.ready
-                                  ? "待启动"
-                                  : "已阻断"
-                            : "未启用"}
+                      {target.protectionError
+                        ? "防护异常"
+                        : starting
+                          ? "启动中"
+                          : running
+                            ? "运行中"
+                            : target.enabled
+                              ? !targetRule.rulesLocked
+                                ? "待锁定"
+                                : !targetRule.enabled
+                                  ? "已暂停"
+                                  : targetRule.ready
+                                    ? "待启动"
+                                    : "已阻断"
+                              : "未启用"}
                     </span>
                   </h3>
                   <div title={target.path} className="app-path mono">

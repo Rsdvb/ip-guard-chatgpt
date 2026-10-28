@@ -26,6 +26,7 @@ namespace IpGuard {
         readonly object state = new object(), actions = new object(), output = new object();
         readonly Dictionary<string,ServiceRuntime> runtimes = new Dictionary<string,ServiceRuntime> { { "claude",new ServiceRuntime() }, { "chatgpt",new ServiceRuntime() } };
         readonly Dictionary<string,LaunchAttempt> launches=new Dictionary<string,LaunchAttempt>();
+        readonly Dictionary<string,string> targetErrors=new Dictionary<string,string>();
         readonly List<object> logs = new List<object>();
         readonly Config config;
         readonly WifiWatch wifi;
@@ -62,7 +63,7 @@ namespace IpGuard {
                 services=new { claude=ServiceSnapshot("claude"),chatgpt=ServiceSnapshot("chatgpt") },
                 networkAdapters=adapters,watchedAdapter=watchedAdapter,networkAdapterId=config.networkAdapterId,
                 detection=detection,launches=launches.Values.ToArray(),running=AllSessions.Where(s=>!s.stopped && s.started).Select(s=>s.appId).Distinct().ToArray(),
-                autostart=config.autostart,apps=config.apps.ToArray(),logs=logs.ToArray()
+                autostart=config.autostart,apps=config.apps.Select(t=>new { t.id,t.service,t.name,t.path,t.arguments,t.enabled,protectionError=targetErrors.ContainsKey(t.id) ? targetErrors[t.id] : "" }).ToArray(),logs=logs.ToArray()
             };
         }
         void Publish() { Emit(new { type = "snapshot", data = Snapshot() }); }
@@ -89,7 +90,7 @@ namespace IpGuard {
                 lock(state) { block=r.pendingBlock; r.pendingBlock=false; }
                 if(!block || !SystemPolicy.Admin) continue;
                 Target[] targets;
-                lock(state) targets=config.apps.Where(t=>t.service==service && t.enabled && (!r.CanContinue(config.services[service]) || !r.sessions.Any(s=>s.appId==t.id && !s.stopped))).ToArray();
+                lock(state) targets=config.apps.Where(t=>t.service==service && t.enabled && !targetErrors.ContainsKey(t.id) && (!r.CanContinue(config.services[service]) || !r.sessions.Any(s=>s.appId==t.id && !s.stopped))).ToArray();
                 foreach(Target target in targets) try { SystemPolicy.Block(target,true); }
                 catch(Exception e) { lock(state) r.pendingBlock=true; Log("error","封锁失败 · "+target.name+" · "+e.Message); }
             }
@@ -153,16 +154,50 @@ namespace IpGuard {
         void StopTarget(string id) {
             lock(state) foreach(Session s in AllSessions.Where(s => s.appId == id)) { s.stopped = true; Win32.TerminateJobObject(s.job, 1); }
         }
+        void RefreshTargets(bool initializing=false) {
+            lock(actions) foreach(Target target in config.apps.ToArray()) RefreshTarget(target,initializing);
+        }
+        void RefreshTarget(Target target,bool initializing=false) {
+            try {
+                string resolved=PackagePolicy.ResolveInstalledPath(target.path);
+                Target next=new Target { id=target.id,service=target.service,name=target.name,path=resolved,arguments=target.arguments,enabled=target.enabled };
+                Data.Validate(next,true);
+                if(config.apps.Any(other=>other.id!=target.id && String.Equals(other.path,next.path,StringComparison.OrdinalIgnoreCase))) throw new Exception("更新后的入口与另一条程序记录重复，请移除重复项。");
+                bool moved=!String.Equals(target.path,next.path,StringComparison.OrdinalIgnoreCase),retry;
+                lock(state) retry=targetErrors.ContainsKey(target.id);
+                if(!initializing && !moved && !retry) return;
+                if(target.enabled) {
+                    StopTarget(target.id);
+                    if(moved) { SystemPolicy.Block(target,true); SystemPolicy.Unintercept(target); SystemPolicy.RemoveFirewall(target); }
+                }
+                if(moved) {
+                    lock(state) target.path=next.path;
+                }
+                if(moved || retry) Data.Save(config);
+                if(target.enabled) { SystemPolicy.Block(target,true); SystemPolicy.Intercept(target); }
+                lock(state) targetErrors.Remove(target.id);
+                if(moved) Log("info",target.name+" · 已识别应用升级并更新程序入口，原 IP 规则保持不变");
+                else if(retry) Log("info",target.name+" · 程序入口已恢复");
+                if(moved || retry) Publish();
+            } catch(Exception error) {
+                string message=error.GetBaseException().Message; bool changed;
+                lock(state) { string prior; changed=!targetErrors.TryGetValue(target.id,out prior) || prior!=message; targetErrors[target.id]=message; }
+                if(changed) { StopTarget(target.id); Log("warning",target.name+" · 程序防护未就绪 · "+message); Publish(); }
+            }
+        }
         void Protect(Target t, bool enabled) {
             if(enabled && !config.services[t.service].rulesLocked) throw new Exception("请先锁定允许的公网 IPv4，再启用程序防护。");
             SystemPolicy.RequireAdmin(); StopTarget(t.id);
             if(enabled) {
+                RefreshTarget(t);
+                lock(state) if(targetErrors.ContainsKey(t.id)) throw new Exception(targetErrors[t.id]);
                 Data.Validate(config.services[t.service].settings); Data.Validate(t, true); RequireClosed(t); SystemPolicy.FirewallHealthy();
                 SystemPolicy.Block(t, true);
                 try { SystemPolicy.Intercept(t); t.enabled = true; Data.Save(config); }
                 catch { SystemPolicy.Unintercept(t); SystemPolicy.RemoveFirewall(t); t.enabled = false; throw; }
             } else {
                 SystemPolicy.Unintercept(t); SystemPolicy.RemoveFirewall(t); t.enabled = false; Data.Save(config);
+                lock(state) targetErrors.Remove(t.id);
             }
             Log("info", t.name + (enabled ? " · 已接管启动" : " · 已解除防护"));
         }
@@ -228,9 +263,11 @@ namespace IpGuard {
                         Save(config.services,next);
                         Log("info",changed.name+" · 启动配置已更新");
                     }
-                    else if(action == "remove") { if(t.enabled) Protect(t, false); lock(state) config.apps.Remove(t); Data.Save(config); }
+                    else if(action == "remove") { if(t.enabled) Protect(t, false); lock(state) { config.apps.Remove(t); targetErrors.Remove(t.id); } Data.Save(config); }
                     else if(action == "stop") { StopTarget(t.id); SystemPolicy.Block(t,true); Log("info", t.name + " · 已停止并封锁"); }
                     else if(action == "start") {
+                        RefreshTarget(t);
+                        lock(state) if(targetErrors.ContainsKey(t.id)) throw new Exception(targetErrors[t.id]);
                         if(!config.services[t.service].rulesLocked || !config.services[t.service].enabled) throw new Exception("请先锁定并开启该程序所属服务。");
                         if(!t.enabled) throw new Exception("请先启用该程序的防护。");
                         Data.Validate(t, true);
@@ -304,8 +341,10 @@ namespace IpGuard {
             }
         }
         void WatchNetwork() {
+            DateTime nextTargets=DateTime.UtcNow.AddMinutes(1);
             while(!quit) {
                 try {
+                    if(SystemPolicy.Admin && DateTime.UtcNow>=nextTargets) { RefreshTargets(); nextTargets=DateTime.UtcNow.AddMinutes(1); }
                     RefreshAdapters();
                     string now = NetworkProbe.Fingerprint(); string prior;
                     lock(state) { prior=topology; topology=now; }
@@ -350,6 +389,7 @@ namespace IpGuard {
             try {
                 lock(state) {
                     Target target=Find(appId); ServiceRuntime r=runtimes[target.service]; Rule rule=config.services[target.service];
+                    if(targetErrors.ContainsKey(target.id)) return false;
                     if(!r.CanContinue(rule)) return false;
                     foreach(Session session in r.sessions.Where(s=>s.appId==appId && !s.stopped && s.epoch==r.epoch)) {
                         bool inside;
@@ -377,6 +417,7 @@ namespace IpGuard {
                     bool inherited=request.ContainsKey("inherit") && request["inherit"] is bool && (bool)request["inherit"];
                     lock(actions) {
                         target = Find(request["id"] as string);
+                        lock(state) if(targetErrors.ContainsKey(target.id)) throw new Exception(targetErrors[target.id]);
                         lock(state) launches.TryGetValue(target.id,out launchAttempt);
                         r=runtimes[target.service]; rule=config.services[target.service];
                         lock(r.gate) {
@@ -447,9 +488,9 @@ namespace IpGuard {
         public void Run() {
             try { BrowserHost.Register(true); } catch(Exception error) { Log("error","浏览器连接注册失败 · "+error.Message); }
             if(config.apps.Any(t => t.enabled) && SystemPolicy.Admin) {
-                TripAll("守护程序已启动，等待重新校验"); BlockPending();
-                foreach(Target t in config.apps.Where(t => t.enabled)) { Data.Validate(t,true); SystemPolicy.Intercept(t); }
+                TripAll("守护程序已启动，等待重新校验");
             }
+            if(SystemPolicy.Admin) { RefreshTargets(true); BlockPending(); }
             NetworkChange.NetworkAddressChanged += NetworkChanged;
             NetworkChange.NetworkAvailabilityChanged += AvailabilityChanged;
             SystemEvents.PowerModeChanged += PowerChanged;

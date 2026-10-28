@@ -26,6 +26,7 @@ namespace IpGuard {
         const string Owned = @"Software\IPGuard\PackageDebugging";
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern int GetPackagePathByFullName(string package, ref uint length, StringBuilder path);
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern int GetPackageFullName(IntPtr process, ref uint length, StringBuilder name);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern int GetPackagesByPackageFamily(string family, ref uint count, [Out] IntPtr[] names, ref uint length, IntPtr buffer);
         [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
         [DllImport("ole32.dll")] static extern int CoAllowSetForegroundWindow([MarshalAs(UnmanagedType.IUnknown)] object server,IntPtr reserved);
         static IPackageDebugSettings Debugger() { return (IPackageDebugSettings)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("B1AEC16F-2383-4852-B0E9-8F0B1DC66B4D"), true)); }
@@ -36,6 +37,45 @@ namespace IpGuard {
             StringBuilder value=new StringBuilder((int)length);
             result=GetPackagePathByFullName(name, ref length, value);
             if(result!=0) throw new Win32Exception(result); return value.ToString();
+        }
+        static string[] RegisteredPackages(string family) {
+            for(int attempt=0;attempt<3;attempt++) {
+                uint count=0,length=0;
+                int result=GetPackagesByPackageFamily(family,ref count,null,ref length,IntPtr.Zero);
+                if(result==0 && count==0) return new string[0];
+                if(result!=122) throw new Win32Exception(result);
+                if(count>1024 || length>1048576) throw new Exception("安装包登记信息过大。");
+                IntPtr buffer=Marshal.AllocHGlobal(checked((int)length*2));
+                try {
+                    IntPtr[] names=new IntPtr[count];
+                    result=GetPackagesByPackageFamily(family,ref count,names,ref length,buffer);
+                    if(result==122) continue;
+                    if(result!=0) throw new Win32Exception(result);
+                    return names.Take((int)count).Select(pointer=>Marshal.PtrToStringUni(pointer)).ToArray();
+                } finally { Marshal.FreeHGlobal(buffer); }
+            }
+            throw new Exception("应用正在更新，请稍后重试。");
+        }
+        public static string ResolveInstalledPath(string executable) {
+            string full=Path.GetFullPath(executable);
+            DirectoryInfo root=new FileInfo(full).Directory;
+            while(root!=null && (root.Parent==null || !String.Equals(root.Parent.Name,"WindowsApps",StringComparison.OrdinalIgnoreCase))) root=root.Parent;
+            if(root==null) return full;
+            string[] original=root.Name.Split('_'); Version prior;
+            if(original.Length!=5 || !Version.TryParse(original[1],out prior) || prior.Build<0 || prior.Revision<0) return full;
+            string relative=full.Substring(root.FullName.Length+1),family=original[0]+"_"+original[4];
+            var packages=RegisteredPackages(family).Select(name=>new { name=name,parts=name.Split('_') })
+                .Where(item=>item.parts.Length==5 && item.parts[0]==original[0] && item.parts[2]==original[2] && item.parts[3]==original[3] && item.parts[4]==original[4])
+                .Select(item=>new { item.name,version=new Version(item.parts[1]) }).OrderByDescending(item=>item.version);
+            foreach(var package in packages) {
+                string directory=PackagePath(package.name);
+                if(directory==null) continue;
+                string candidate=Path.GetFullPath(Path.Combine(directory,relative));
+                if(!candidate.StartsWith(Path.GetFullPath(directory)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate)) continue;
+                PackageIdentity identity=Find(candidate);
+                if(identity!=null && identity.fullName==package.name) return candidate;
+            }
+            throw new Exception("应用未安装、正在更新或入口已改变；请稍后重试，或移除后重新添加。");
         }
         public static PackageIdentity Find(string exe) {
             DirectoryInfo directory=new FileInfo(exe).Directory;
