@@ -1,5 +1,7 @@
 appId: com.ip-guard.desktop
 productName: IP Guard
+extraMetadata:
+  name: ip-guard
 asar: true
 npmRebuild: false
 directories:

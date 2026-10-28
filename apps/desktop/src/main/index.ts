@@ -18,6 +18,13 @@ import { serveRenderer } from "#src/main/renderer.ts";
 import { ApplicationUpdates } from "#src/main/updates.ts";
 import { createMainWindow } from "#src/main/window.ts";
 
+app.setName("IP Guard");
+if (process.platform !== "win32" && process.env.IP_GUARD_USER_DATA_DIR) {
+  if (!path.isAbsolute(process.env.IP_GUARD_USER_DATA_DIR))
+    throw new Error("IP_GUARD_USER_DATA_DIR must be an absolute path");
+  app.setPath("userData", process.env.IP_GUARD_USER_DATA_DIR);
+}
+
 const origin = (name: string, parse: (value: string) => string | null) => {
   const value = process.env[name];
 

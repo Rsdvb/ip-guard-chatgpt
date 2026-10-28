@@ -51,7 +51,7 @@ final class FilterDataProvider: NEFilterDataProvider {
         case .unmanaged: return .allow()
         case .block: return .drop()
         case .allow:
-            return NEFilterNewFlowVerdict(filterInbound: true, peekInboundBytes: Int.max, filterOutbound: true, peekOutboundBytes: Int.max)
+            return NEFilterNewFlowVerdict.filterDataVerdict(withFilterInbound: true, peekInboundBytes: Int.max, filterOutbound: true, peekOutboundBytes: Int.max)
         }
     }
     private func dataVerdict(_ flow: NEFilterFlow, count: Int) -> NEFilterDataVerdict {
