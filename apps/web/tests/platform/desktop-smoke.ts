@@ -109,7 +109,11 @@ try {
   assert.equal(browser.services.claude.phase, "unlocked");
   assert.equal(browser.services.chatgpt.phase, "unlocked");
   await page.screenshot({
-    path: path.resolve(import.meta.dirname, "../test-results", `packaged-${process.platform}.png`),
+    path: path.resolve(
+      import.meta.dirname,
+      "../../test-results",
+      `packaged-${process.platform}.png`,
+    ),
     fullPage: true,
   });
   const evidence = {
