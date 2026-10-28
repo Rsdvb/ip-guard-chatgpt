@@ -153,3 +153,54 @@ for (const { service, name, url } of [
     }
   });
 }
+
+test("steady native heartbeats keep permissions without repeating tab scans and badge writes", async ({
+  playwright,
+}) => {
+  const profile = await mkdtemp(path.join(tmpdir(), "ipg-idle-"));
+  let context: BrowserContext | undefined;
+  try {
+    context = await playwright.chromium.launchPersistentContext(profile, {
+      channel: "chromium",
+      headless: true,
+      args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+    });
+    const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+    await installNativeHost(worker);
+    const id = new URL(worker.url()).host;
+    const page = await context.newPage();
+    await page.goto(`chrome-extension://${id}/blocked.html?target=https%3A%2F%2Fclaude.ai%2F`, {
+      waitUntil: "networkidle",
+    });
+    await page.getByRole("button", { name: "重新连接", exact: true }).click();
+    await sendState(worker, "claude", true);
+    await expect(page.getByRole("status")).toHaveText("校验通过");
+    await worker.evaluate(() => {
+      const api: unknown = Reflect.get(globalThis, "chrome");
+      if (!api || typeof api !== "object") throw new Error("Chrome API missing");
+      const counts = { scans: 0, badges: 0 };
+      for (const [objectName, methodName, counter] of [
+        ["tabs", "query", "scans"],
+        ["action", "setBadgeText", "badges"],
+      ] as const) {
+        const object: unknown = Reflect.get(api, objectName);
+        if (!object || typeof object !== "object") throw new Error("Chrome API object missing");
+        const method: unknown = Reflect.get(object, methodName);
+        if (typeof method !== "function") throw new Error("Chrome API method missing");
+        Reflect.set(object, methodName, (...args: unknown[]) => {
+          counts[counter]++;
+          return Reflect.apply(method, object, args);
+        });
+      }
+      Reflect.set(globalThis, "idleApiCounts", counts);
+    });
+    // Native Messaging is an external transport; its 250 ms fixture heartbeat remains active.
+    await page.waitForTimeout(1800);
+    const counts = await worker.evaluate(() => Reflect.get(globalThis, "idleApiCounts"));
+    expect(counts).toEqual({ scans: 0, badges: 0 });
+    await expect(page.getByRole("status")).toHaveText("校验通过");
+  } finally {
+    await context?.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});

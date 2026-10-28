@@ -80,6 +80,12 @@ async function running(file: string) {
 try {
   await guard.start();
   assert.equal(guard.snapshot.admin, false);
+  let idleUpdates = 0;
+  const countIdleUpdate = () => idleUpdates++;
+  guard.on("snapshot", countIdleUpdate);
+  await delay(1600);
+  guard.off("snapshot", countIdleUpdate);
+  assert(idleUpdates <= 1, "an unchanged idle guardian must not keep broadcasting snapshots");
   for (const service of ["claude", "chatgpt"] as const)
     await guard.request("lock", {
       service,
