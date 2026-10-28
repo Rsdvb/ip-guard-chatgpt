@@ -59,8 +59,9 @@ final class PolicyListener: NSObject, NSXPCListenerDelegate {
         connection.exportedInterface = NSXPCInterface(with: IPGuardPolicyChannel.self)
         connection.exportedObject = session
         let lost = { [weak self] in
-            self?.store.disconnected(uid: session.uid, peer: session.peer)
-            self?.lock.lock(); self?.connections[session.peer] = nil; self?.lock.unlock()
+            guard let self = self else { return }
+            self.store.disconnected(uid: session.uid, peer: session.peer)
+            self.lock.lock(); self.connections[session.peer] = nil; self.lock.unlock()
         }
         connection.invalidationHandler = lost; connection.interruptionHandler = lost
         connection.resume(); return true

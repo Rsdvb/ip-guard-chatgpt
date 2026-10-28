@@ -49,6 +49,7 @@ mac:
       arch: [arm64]
   artifactName: IP-Guard-${version}-macOS-${arch}.${ext}
 linux:
+  executableName: ip-guard
   extraResources:
     - from: posix
       to: posix
@@ -59,4 +60,4 @@ linux:
     - target: tar.gz
       arch: [x64]
   artifactName: IP-Guard-${version}-Ubuntu-${arch}.${ext}
-  maintainer: IP Guard Contributors
+  maintainer: Rsdvb <64085433+Rsdvb@users.noreply.github.com>

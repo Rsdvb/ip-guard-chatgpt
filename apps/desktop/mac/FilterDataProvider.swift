@@ -51,14 +51,14 @@ final class FilterDataProvider: NEFilterDataProvider {
         case .unmanaged: return .allow()
         case .block: return .drop()
         case .allow:
-            return .filterDataVerdict(withFilterInbound: true, peekInboundBytes: NEFilterFlowBytesMax, filterOutbound: true, peekOutboundBytes: NEFilterFlowBytesMax)
+            return NEFilterNewFlowVerdict(filterInbound: true, peekInboundBytes: Int.max, filterOutbound: true, peekOutboundBytes: Int.max)
         }
     }
     private func dataVerdict(_ flow: NEFilterFlow, count: Int) -> NEFilterDataVerdict {
         switch decision(flow) {
         case .unmanaged: return .allow()
         case .block: return .drop()
-        case .allow: return NEFilterDataVerdict(passBytes: count, peekBytes: NEFilterFlowBytesMax)
+        case .allow: return NEFilterDataVerdict(passBytes: count, peekBytes: Int.max)
         }
     }
     override func handleOutboundData(from flow: NEFilterFlow, readBytesStartOffset offset: Int, readBytes: Data) -> NEFilterDataVerdict { dataVerdict(flow, count: readBytes.count) }
