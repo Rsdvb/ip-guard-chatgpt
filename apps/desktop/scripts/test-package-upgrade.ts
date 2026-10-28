@@ -9,10 +9,8 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
-  realpathSync,
   rmSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
@@ -30,7 +28,7 @@ assert.ok(
 );
 const data = path.join(localData, "IPGuard");
 assert.ok(!existsSync(data), "An isolated runner must have no existing IP Guard data to replace");
-const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), "ipguard-upgrade-")));
+const directory = mkdtempSync(path.join(root, "dist/upgrade-fixture-"));
 copyFileSync(path.join(root, "dist/NativePolicyTests.exe"), path.join(directory, "fixture.exe"));
 copyFileSync(path.join(root, "assets/tray.png"), path.join(directory, "logo.png"));
 const valid = path.join(directory, `ipguard-fixture-${randomUUID()}.exe`);

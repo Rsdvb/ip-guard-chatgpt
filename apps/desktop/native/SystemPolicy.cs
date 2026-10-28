@@ -142,15 +142,28 @@ namespace IpGuard {
             PackagePolicy.Recover();
             foreach (RegistryView view in Views) {
                 using (RegistryKey root = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
-                using (RegistryKey ifeo = root.OpenSubKey(Ifeo, true)) {
+                using (RegistryKey ifeo = root.OpenSubKey(Ifeo, false)) {
                     if (ifeo == null) continue;
-                    foreach (string image in ifeo.GetSubKeyNames()) using (RegistryKey parent = ifeo.OpenSubKey(image, true)) {
-                        foreach (string name in parent.GetSubKeyNames()) {
-                            bool own;
-                            using (RegistryKey child = parent.OpenSubKey(name)) own = child.GetValue("IPGuardOwner") as string == Owner;
-                            if (own) parent.DeleteSubKeyTree(name, false);
+                    foreach (string image in ifeo.GetSubKeyNames()) {
+                        List<string> owned=new List<string>();
+                        using(RegistryKey parent=ifeo.OpenSubKey(image,false)) {
+                            if(parent==null) continue;
+                            foreach(string name in parent.GetSubKeyNames().Where(value=>value.StartsWith("IPGuard_",StringComparison.Ordinal)))
+                                using(RegistryKey child=parent.OpenSubKey(name,false))
+                                    if(child!=null && child.GetValue("IPGuardOwner") as string==Owner) owned.Add(name);
                         }
-                        RestoreFilter(parent);
+                        if(owned.Count==0) continue;
+                        using(RegistryKey parent=root.OpenSubKey(Ifeo+"\\"+image,true)) {
+                            if(parent==null) continue;
+                            foreach(string name in owned) {
+                                using(RegistryKey child=parent.OpenSubKey(name,false)) {
+                                    if(child==null) continue;
+                                    if(child.GetValue("IPGuardOwner") as string!=Owner) throw new Exception("拦截项所有者已改变，已保留该项。");
+                                }
+                                parent.DeleteSubKeyTree(name,false);
+                            }
+                            RestoreFilter(parent);
+                        }
                     }
                 }
             }
