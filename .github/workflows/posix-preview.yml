@@ -56,6 +56,24 @@ jobs:
           test -n "$binary" && test -f "$binary" && test -x "$binary"
           export IP_GUARD_PACKAGED_EXECUTABLE="$binary"
           xvfb-run -a node apps/web/tests/platform/desktop-smoke.ts 2>&1 | tee packaged-validation.log
+      - name: Installed Ubuntu system service, upgrade and GUI policy acknowledgement
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -o pipefail
+          uid=$(id -u)
+          printf '{"action":"policy","policy":{"format":1,"uid":%s,"targets":[]}}' "$uid" | sudo env PKEXEC_UID="$uid" /usr/lib/ipguard/ipguard-system enable "$uid"
+          sudo systemctl is-active "ipguard@$uid.service"
+          sudo apt-get install --reinstall -y ./apps/desktop/release/*.deb
+          sudo systemctl is-active "ipguard@$uid.service"
+          export IP_GUARD_PACKAGED_EXECUTABLE="$(command -v ip-guard)"
+          IP_GUARD_EXPECT_SYSTEM=1 xvfb-run -a node apps/web/tests/platform/desktop-smoke.ts 2>&1 | tee system-service-validation.log
+          mv packaged-smoke.json system-packaged-smoke.json
+          mv cold-tray-smoke.json system-cold-tray-smoke.json
+          sudo systemctl show "ipguard@$uid.service" -p MemoryCurrent -p CPUUsageNSec >> system-service-validation.log
+          sudo apt-get remove -y ip-guard
+          test ! -e /usr/lib/ipguard/ipguard-system
+          test ! -e /etc/systemd/system/ipguard@.service
       - name: Start packaged Windows desktop and native host
         if: runner.os == 'Windows'
         shell: bash
@@ -78,4 +96,8 @@ jobs:
             posix-validation.log
             platform.json
             packaged-smoke.json
+            cold-tray-smoke.json
+            system-packaged-smoke.json
+            system-cold-tray-smoke.json
+            system-service-validation.log
             packaged-validation.log
