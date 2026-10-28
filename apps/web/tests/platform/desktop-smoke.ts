@@ -272,7 +272,7 @@ try {
       child.kill();
     }, 15000);
     try {
-      await restored
+      const reply = await restored
         .evaluate(async () => {
           const bridge: unknown = Reflect.get(globalThis, "desktop");
           if (!bridge || typeof bridge !== "object") throw new Error("Missing desktop bridge");
@@ -283,6 +283,8 @@ try {
         .catch((error: Error) => {
           if (!/closed|disposed|terminated/i.test(error.message)) throw error;
         });
+      if (reply !== undefined) assert.equal(replySchema.parse(reply).cancelled, false);
+      await backgroundApp.close(); // Detach the test inspector so Node can complete its normal exit.
       await exited;
       assert.equal(child.exitCode, 0, "Complete exit must stop the guardian and finish normally");
       fullyExited = true;

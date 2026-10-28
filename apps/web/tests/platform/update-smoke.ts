@@ -58,9 +58,9 @@ export async function testWindowsUpdates(
   const address = server.address();
   assert.ok(address && typeof address === "object");
   try {
-    await application.evaluate(async ({ app }, base) => {
-      const { createRequire } = await import("node:module");
-      const path = await import("node:path");
+    await application.evaluate(({ app }, base) => {
+      const { createRequire } = process.getBuiltinModule("module");
+      const path = process.getBuiltinModule("path");
       const module: unknown = createRequire(path.join(app.getAppPath(), "package.json"))(
         "electron-updater",
       );
@@ -101,7 +101,8 @@ export async function testWindowsUpdates(
       "Every published Windows installer needs a working update feed",
     );
     assert.equal(initial.repository, "Rsdvb/ip-guard-chatgpt");
-    assert.equal((await invoke("update:check")).phase, "available");
+    const available = await invoke("update:check");
+    assert.equal(available.phase, "available", available.message);
     const rejected = await invoke("update:download");
     assert.equal(rejected.phase, "error", "Corrupt installer bytes must never become installable");
     assert.match(rejected.message, /checksum|sha512|mismatch/i);
