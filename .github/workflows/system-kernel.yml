@@ -1,4 +1,4 @@
-name: Ubuntu system protection kernel tests
+name: Native system protection tests
 on:
   workflow_dispatch:
 permissions:
@@ -37,3 +37,7 @@ jobs:
         run: |
           xcrun swiftc -swift-version 5 -parse-as-library apps/desktop/mac/Policy.swift apps/desktop/mac/PolicyTests.swift -o "$RUNNER_TEMP/mac-policy-tests"
           "$RUNNER_TEMP/mac-policy-tests"
+      - name: Compile native controller and extension
+        run: |
+          xcrun swiftc -swift-version 5 -O -framework NetworkExtension -framework SystemExtensions -framework Security -framework AppKit apps/desktop/mac/Policy.swift apps/desktop/mac/PolicyIPC.swift apps/desktop/mac/ProcessMonitor.swift apps/desktop/mac/FilterControl.swift -o "$RUNNER_TEMP/IpGuardMacControl"
+          xcrun swiftc -swift-version 5 -O -framework NetworkExtension -framework SystemExtensions -framework Security apps/desktop/mac/Policy.swift apps/desktop/mac/PolicyIPC.swift apps/desktop/mac/FilterDataProvider.swift apps/desktop/mac/ExtensionMain.swift -o "$RUNNER_TEMP/IPGuardFilter"
