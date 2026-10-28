@@ -57,16 +57,25 @@ try {
       return result;
     });
     snapshot = snapshotSchema.parse(replySchema.parse(value).snapshot);
-    if (snapshot.online) break;
+    if (
+      snapshot.online &&
+      (!process.env.IP_GUARD_EXPECT_SYSTEM || snapshot.systemProtection?.phase === "enabled")
+    )
+      break;
     await delay(100);
   } while (performance.now() < deadline);
   assert(snapshot?.online, "Packaged guardian must be online");
+  if (process.env.IP_GUARD_EXPECT_SYSTEM) {
+    assert.equal(snapshot.systemProtection?.phase, "enabled");
+    assert.equal(snapshot.systemProtection.active, true);
+    assert.equal(snapshot.processProtection, "system");
+  }
   assert.equal(snapshot.platform ?? "win32", process.platform);
   assert.equal(snapshot.nativeVersion, nativeVersion);
   assert.equal(snapshot.admin, process.platform === "win32");
   if (process.platform !== "win32") {
     await page
-      .getByText(process.env.IP_GUARD_EXPECT_SYSTEM ? "系统防护" : "受控启动测试版", {
+      .getByText(process.env.IP_GUARD_EXPECT_SYSTEM ? "系统防护测试版" : "受控启动测试版", {
         exact: true,
       })
       .first()

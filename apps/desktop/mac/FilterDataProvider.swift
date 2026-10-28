@@ -3,9 +3,10 @@ import NetworkExtension
 import Security
 
 final class FlowIdentity: NSObject {
-    let path: String
+    let path: String?
+    let identifier: String?
     let uid: UInt32
-    init(path: String, uid: UInt32) { self.path = path; self.uid = uid }
+    init(path: String?, identifier: String?, uid: UInt32) { self.path = path; self.identifier = identifier; self.uid = uid }
 }
 
 final class FilterDataProvider: NEFilterDataProvider {
@@ -37,23 +38,24 @@ final class FilterDataProvider: NEFilterDataProvider {
         var staticCode: SecStaticCode?
         guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode = staticCode else { return nil }
         var location: CFURL?
-        guard SecCodeCopyPath(staticCode, [], &location) == errSecSuccess, let location = location else { return nil }
+        let located = SecCodeCopyPath(staticCode, [], &location) == errSecSuccess
+        var information: CFDictionary?
+        let signed = SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess
+        let identifier = signed ? (information as? [String: Any])?[kSecCodeInfoIdentifier as String] as? String : nil
         let uid = token.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt32.self) }
-        let result = FlowIdentity(path: (location as URL).standardizedFileURL.path, uid: uid)
+        let result = FlowIdentity(path: located ? location.map { ($0 as URL).standardizedFileURL.path } : nil, identifier: identifier, uid: uid)
         identities.setObject(result, forKey: token as NSData); return result
     }
     private func decision(_ flow: NEFilterFlow) -> FilterDecision {
         if let value = identity(flow.sourceProcessAuditToken) {
-            let result = store.decision(path: value.path, uid: value.uid, now: continuousNow())
+            let result = value.path.map { store.decision(path: $0, uid: value.uid, now: continuousNow()) } ?? store.unidentifiedApp(identifier: value.identifier, uid: value.uid)
             if result != .unmanaged { return result }
         }
         if let value = identity(flow.sourceAppAuditToken) {
-            let result = store.decision(path: value.path, uid: value.uid, now: continuousNow())
+            let result = value.path.map { store.decision(path: $0, uid: value.uid, now: continuousNow()) } ?? store.unidentifiedApp(identifier: value.identifier, uid: value.uid)
             if result != .unmanaged { return result }
         }
-        guard let token = flow.sourceAppAuditToken ?? flow.sourceProcessAuditToken, token.count == 32 else { return .unmanaged }
-        let uid = token.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt32.self) }
-        return store.unidentifiedApp(identifier: flow.sourceAppIdentifier, uid: uid)
+        return .unmanaged
     }
     override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
         switch decision(flow) {

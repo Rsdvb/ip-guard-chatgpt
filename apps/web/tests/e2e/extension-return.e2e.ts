@@ -175,6 +175,23 @@ test("steady native heartbeats keep permissions without repeating tab scans and 
     await page.getByRole("button", { name: "重新连接", exact: true }).click();
     await sendState(worker, "claude", true);
     await expect(page.getByRole("status")).toHaveText("校验通过");
+    await page.evaluate(() => {
+      Reflect.set(globalThis, "idleDomWrites", 0);
+      const root = document.getElementById("app");
+      if (!root) throw new Error("Extension root missing");
+      new MutationObserver((changes) =>
+        Reflect.set(
+          globalThis,
+          "idleDomWrites",
+          Number(Reflect.get(globalThis, "idleDomWrites")) + changes.length,
+        ),
+      ).observe(root, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        characterData: true,
+      });
+    });
     await worker.evaluate(() => {
       const api: unknown = Reflect.get(globalThis, "chrome");
       if (!api || typeof api !== "object") throw new Error("Chrome API missing");
@@ -198,6 +215,7 @@ test("steady native heartbeats keep permissions without repeating tab scans and 
     await page.waitForTimeout(1800);
     const counts = await worker.evaluate(() => Reflect.get(globalThis, "idleApiCounts"));
     expect(counts).toEqual({ scans: 0, badges: 0 });
+    expect(await page.evaluate(() => Reflect.get(globalThis, "idleDomWrites"))).toBe(0);
     await expect(page.getByRole("status")).toHaveText("校验通过");
   } finally {
     await context?.close();

@@ -93,6 +93,7 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 updatePrivacyButton();
+let rendered = "";
 async function render() {
   const saved = await chrome.storage.session.get(["state", "receivedAt"]);
   const parsed = browserStateSchema.safeParse(saved.state);
@@ -100,6 +101,11 @@ async function render() {
   const installedVersion = chrome.runtime.getManifest().version;
   const latestVersion = state?.latestExtensionVersion ?? state?.appVersion ?? "";
   const update = isNewerExtensionVersion(latestVersion, installedVersion);
+  const age = typeof saved.receivedAt === "number" ? Date.now() - saved.receivedAt : Infinity;
+  const fresh = age >= 0 && age < 3500;
+  const signature = JSON.stringify([state, fresh, selected(), ipsVisible]);
+  if (signature === rendered) return;
+  rendered = signature;
   element("extension-update").hidden = !update;
   element("update-version").textContent = update ? `插件有更新 v${latestVersion}` : "";
   if (update)
@@ -107,8 +113,6 @@ async function render() {
       "href",
       `https://github.com/Rsdvb/ip-guard-chatgpt/releases/download/v${latestVersion}/IP-Guard-Browser-${latestVersion}.zip`,
     );
-  const age = typeof saved.receivedAt === "number" ? Date.now() - saved.receivedAt : Infinity;
-  const fresh = age >= 0 && age < 3500;
   const rule = state?.services[selected()];
   const phase = fresh && rule ? rule.phase : "offline";
   permitted = Boolean(state && !shouldBlockUrl(destination(), state, fresh));
@@ -160,6 +164,10 @@ open.addEventListener("click", async () => {
   if (blocked) location.replace(target);
   else void chrome.tabs.create({ url: target });
 });
-chrome.storage.onChanged.addListener(() => void render());
-setInterval(() => void render(), 1000);
+const renderVisible = () => {
+  if (!document.hidden) void render();
+};
+chrome.storage.onChanged.addListener(renderVisible);
+document.addEventListener("visibilitychange", renderVisible);
+setInterval(renderVisible, 1000);
 void render();

@@ -70,7 +70,7 @@ final class FilterControl: NSObject, OSSystemExtensionRequestDelegate {
             do {
                 let configuration = self.manager.providerConfiguration ?? NEFilterProviderConfiguration()
                 let saved = try self.bindings(policy)
-                configuration.filterSockets = true; configuration.filterBrowsers = false
+                configuration.filterSockets = true
                 configuration.filterDataProviderBundleIdentifier = extensionID
                 configuration.vendorConfiguration = ["IPGuardBindings": saved]
                 self.manager.providerConfiguration = configuration
@@ -100,12 +100,16 @@ final class FilterControl: NSObject, OSSystemExtensionRequestDelegate {
         callback(proxy)
     }
     func stop(policy: FilterPolicy) {
+      load {
         do {
-            let resolved = try monitor.resolved(policy)
-            _ = try monitor.enforce(resolved, force: true)
-            guard !monitor.hasRunning(resolved) else { fail("仍有受保护程序未结束，请稍后重试") }
+            if let data = self.manager.providerConfiguration?.vendorConfiguration?["IPGuardBindings"] as? Data,
+               let bindings = try? JSONDecoder().decode([String:[FilterTarget]].self,from:data) { self.monitor.seed(bindings[String(getuid())] ?? []) }
+            let resolved = try self.monitor.resolved(policy)
+            _ = try self.monitor.enforce(resolved, force: true)
+            guard !self.monitor.hasRunning(resolved) else { fail("仍有受保护程序未结束，请稍后重试") }
             emit("enabled", "已结束所选服务的已登记程序"); exit(0)
         } catch { fail("停止所选程序失败：\(error)") }
+      }
     }
     func stream() {
         load {

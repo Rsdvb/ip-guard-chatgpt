@@ -50,8 +50,11 @@ export class SystemProtection {
   }
   async stop() {
     try {
-      await this.backend?.stopScope({ service: "claude" });
-      await this.backend?.stopScope({ service: "chatgpt" });
+      try {
+        await this.backend?.stopScope({ service: "claude" });
+      } finally {
+        await this.backend?.stopScope({ service: "chatgpt" });
+      }
     } finally {
       this.backend?.stop();
     }
