@@ -32,6 +32,7 @@ const previous = path.join(directory, "Setup-0.14.0.exe");
 writeFileSync(previous, bytes);
 function execute(executable: string, args: string[], timeout = 180000) {
   const result = spawnSync(executable, args, {
+    argv0: `"${executable}"`,
     encoding: "utf8",
     windowsHide: true,
     windowsVerbatimArguments: true,
