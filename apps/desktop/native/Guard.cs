@@ -167,6 +167,7 @@ namespace IpGuard {
                 lock(state) retry=targetErrors.ContainsKey(target.id);
                 if(!initializing && !moved && !retry) return;
                 if(target.enabled) {
+                    if(moved) RequireClosed(next);
                     StopTarget(target.id);
                     if(moved) { SystemPolicy.Block(target,true); SystemPolicy.Unintercept(target); SystemPolicy.RemoveFirewall(target); }
                 }

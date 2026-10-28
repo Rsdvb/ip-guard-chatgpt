@@ -174,6 +174,7 @@ async function guardian(expected: string) {
     if (child.exitCode === null) {
       try {
         await request("shutdown");
+        await once(child, "exit");
       } finally {
         if (child.exitCode === null) {
           child.kill();
@@ -247,7 +248,10 @@ try {
 try {
   const recovered = spawnSync(native, ["recover"], { encoding: "utf8", timeout: 30000 });
   if (recovered.status !== 0)
-    throw recovered.error || new Error("Fixture protection recovery failed");
+    throw (
+      recovered.error ||
+      new Error("Fixture protection recovery failed: " + recovered.stdout + recovered.stderr)
+    );
   fixture("remove");
   rmSync(data, { recursive: true, force: true });
   rmSync(directory, { recursive: true, force: true });
