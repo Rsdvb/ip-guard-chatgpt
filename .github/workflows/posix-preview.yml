@@ -1,4 +1,4 @@
-name: macOS and Ubuntu preview
+name: Three-platform validation
 on:
   workflow_dispatch:
 permissions:
@@ -8,9 +8,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [windows-2025, ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       CI: true
       E2E_TEST_PORT: 3265
@@ -24,6 +24,11 @@ jobs:
         with:
           node-version: 24.22.1
           cache: pnpm
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Linux'
+        with:
+          go-version: 1.27.3
+          cache-dependency-path: apps/desktop/linux/go.sum
       - run: pnpm install --frozen-lockfile
       - name: Browser test runtime
         run: pnpm --filter @ip-guard/web exec playwright install --with-deps chromium
@@ -51,6 +56,10 @@ jobs:
           test -n "$binary" && test -f "$binary" && test -x "$binary"
           export IP_GUARD_PACKAGED_EXECUTABLE="$binary"
           xvfb-run -a node apps/web/tests/platform/desktop-smoke.ts 2>&1 | tee packaged-validation.log
+      - name: Start packaged Windows desktop and native host
+        if: runner.os == 'Windows'
+        shell: bash
+        run: node apps/web/tests/platform/desktop-smoke.ts 2>&1 | tee packaged-validation.log
       - name: Start packaged Apple Silicon desktop and native host
         if: runner.os == 'macOS'
         shell: bash
@@ -61,6 +70,7 @@ jobs:
           name: ip-guard-${{ matrix.os }}
           retention-days: 14
           path: |
+            apps/desktop/release/*.exe
             apps/desktop/release/*.zip
             apps/desktop/release/*.deb
             apps/desktop/release/*.tar.gz
