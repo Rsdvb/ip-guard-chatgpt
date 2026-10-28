@@ -248,6 +248,7 @@ const backgroundApp = await _electron.launch({
   env: { ...process.env, IP_GUARD_USER_DATA_DIR: backgroundProfile },
   timeout: 30000,
 });
+const backgroundProcess = backgroundApp.process();
 try {
   await delay(3000);
   assert.equal(
@@ -255,7 +256,7 @@ try {
     0,
     "Cold tray startup must not create a hidden renderer",
   );
-  const resources = await sampleResources(backgroundApp.process().pid!, "cold tray startup");
+  const resources = await sampleResources(backgroundProcess.pid!, "cold tray startup");
   await backgroundApp.evaluate(({ app }) => app.emit("activate"));
   const restored = await backgroundApp.firstWindow();
   await restored.waitForLoadState("networkidle");
@@ -266,7 +267,7 @@ try {
     await backgroundApp.evaluate(({ dialog }) => {
       dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
     });
-    const child = backgroundApp.process();
+    const child = backgroundProcess;
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     const timer = setTimeout(() => {
       child.kill();
@@ -284,7 +285,7 @@ try {
           if (!/closed|disposed|terminated/i.test(error.message)) throw error;
         });
       if (reply !== undefined) assert.equal(replySchema.parse(reply).cancelled, false);
-      await backgroundApp.close(); // Detach the test inspector so Node can complete its normal exit.
+      if (child.exitCode === null) await backgroundApp.close(); // Detach the inspector if the app has not already exited.
       await exited;
       assert.equal(child.exitCode, 0, "Complete exit must stop the guardian and finish normally");
       fullyExited = true;
@@ -307,6 +308,6 @@ try {
     ),
   );
 } finally {
-  if (backgroundApp.process().exitCode === null) await backgroundApp.close();
+  if (backgroundProcess.exitCode === null) await backgroundApp.close();
   await rm(backgroundProfile, { recursive: true, force: true });
 }
