@@ -672,7 +672,7 @@ export function GuardApp() {
   const offline = Boolean(bridge && !loading && (!snapshot.online || failure));
   const managed = snapshot.platform === "darwin" || snapshot.platform === "linux";
   const available = Boolean(bridge && snapshot.online && (snapshot.admin || managed) && !failure);
-  const enabledCount = snapshot.apps.filter((a) => a.enabled).length;
+  const enabledCount = snapshot.apps.filter((a) => a.enabled && !a.protectionError).length;
   const status = loading
     ? "连接守护程序"
     : offline
