@@ -52,6 +52,22 @@ jobs:
           $script=Join-Path $env:GITHUB_WORKSPACE 'apps/web/tests/platform/windows-window-state.ps1'
           $output=Join-Path $env:GITHUB_WORKSPACE 'windows-window-state.json'
           Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$script+'"'),'-Output',('"'+$output+'"'))
+      - name: Compare invocation manifest on the isolated fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $tools=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10/bin'
+          $mt=Get-ChildItem -LiteralPath $tools -Recurse -Filter mt.exe | Where-Object {$_.FullName -match '\\x64\\'} | Sort-Object FullName -Descending | Select-Object -First 1
+          if(!$mt){throw 'Windows manifest SDK tool unavailable'}
+          $binary=$env:IP_GUARD_PACKAGED_EXECUTABLE
+          $manifest=Join-Path $env:RUNNER_TEMP 'ipg-fixture.manifest'
+          & $mt.FullName '-nologo' ('-inputresource:'+$binary+';#1') ('-out:'+$manifest)
+          if($LASTEXITCODE -ne 0){throw 'Read fixture manifest failed'}
+          $text=[IO.File]::ReadAllText($manifest)
+          if(!$text.Contains('requireAdministrator')){throw 'Expected original administrator manifest'}
+          [IO.File]::WriteAllText($manifest,$text.Replace('requireAdministrator','asInvoker'),[Text.UTF8Encoding]::new($false))
+          & $mt.FullName '-nologo' ('-manifest:'+$manifest) ('-outputresource:'+$binary+';#1')
+          if($LASTEXITCODE -ne 0){throw 'Fixture manifest comparison failed'}
       - name: Direct main and browser inspector probes
         run: node apps/web/tests/platform/windows-inspector-probe.ts
       - name: Inspect real packaged window and tray behavior
