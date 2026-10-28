@@ -47,9 +47,8 @@ jobs:
         shell: bash
         run: |
           sudo apt-get install -y ./apps/desktop/release/*.deb
-          package=$(dpkg-deb --field ./apps/desktop/release/*.deb Package)
-          binary=$(dpkg -L "$package" | sed -n '/\/ip-guard$/p' | head -n 1)
-          test -n "$binary" && test -x "$binary"
+          binary=$(command -v ip-guard)
+          test -n "$binary" && test -f "$binary" && test -x "$binary"
           export IP_GUARD_PACKAGED_EXECUTABLE="$binary"
           xvfb-run -a node apps/web/tests/platform/desktop-smoke.ts 2>&1 | tee packaged-validation.log
       - name: Start packaged Apple Silicon desktop and native host
