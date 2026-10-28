@@ -26,6 +26,14 @@ import Foundation
         let saved = try JSONEncoder().encode([String(uid): [claude.binding, gpt.binding]])
         try store.loadBindings(saved)
         precondition(store.decision(path: claude.executable, uid: uid, now: 1) == .block)
+        let replayStore = PolicyStore()
+        guard var fields = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { preconditionFailure("Invalid test envelope") }
+        fields["sequence"] = 1
+        let sequenced = try JSONSerialization.data(withJSONObject: fields)
+        try replayStore.update(sequenced, uid: uid, peer: peer, now: 120)
+        var replayRejected = false
+        do { try replayStore.update(sequenced, uid: uid, peer: peer, now: 121) } catch { replayRejected = true }
+        precondition(replayRejected, "A repeated policy revision must not renew a network grant")
         print("PASS Swift filter policy: independent services, UID isolation, bundle boundaries, heartbeat expiry, disconnect and persisted deny defaults")
     }
 }
