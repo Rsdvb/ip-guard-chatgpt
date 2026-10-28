@@ -515,6 +515,10 @@ export class PosixGuardian extends EventEmitter {
       if (!row || Number(row[1]) !== process.getuid?.()) continue;
       let executable = row[3];
       if (process.platform === "linux") {
+        // Linux comm is limited to 15 bytes; unrelated non-dumpable processes must not
+        // prevent protection from being enabled for an application with a different name.
+        if (executable !== Buffer.from(path.basename(filename)).subarray(0, 15).toString())
+          continue;
         try {
           executable = await realpath(`/proc/${row[2]}/exe`);
         } catch (error) {
