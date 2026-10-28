@@ -46,15 +46,26 @@ jobs:
           & 'C:/Program Files/7-Zip/7z.exe' x $image[0].FullName "-o$application" -y
           if($LASTEXITCODE -ne 0){throw 'Application extraction failed'}
           "IP_GUARD_PACKAGED_EXECUTABLE=$application/IP Guard.exe" >> $env:GITHUB_ENV
+      - name: Capture application-owned Windows dialogs
+        shell: pwsh
+        run: |
+          $script=Join-Path $env:GITHUB_WORKSPACE 'apps/web/tests/platform/windows-window-state.ps1'
+          $output=Join-Path $env:GITHUB_WORKSPACE 'windows-window-state.json'
+          Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$script+'"'),'-Output',('"'+$output+'"'))
       - name: Inspect real packaged window and tray behavior
         shell: bash
         run: node apps/web/tests/platform/desktop-smoke.ts 2>&1 | tee windows-diagnostic.log
+      - name: Read application diagnostics
+        if: always()
+        shell: pwsh
+        run: Get-Content -LiteralPath windows-window-state.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: windows-diagnostic
           path: |
             windows-diagnostic.log
+            windows-window-state.json
             packaged-smoke.json
             cold-tray-smoke.json
             apps/web/test-results/packaged-win32.png
