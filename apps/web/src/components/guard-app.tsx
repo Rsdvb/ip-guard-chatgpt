@@ -57,6 +57,7 @@ import {
 import { BrowserExtensionPanel } from "#src/components/browser-extension-panel.tsx";
 import { CoffeePage } from "#src/components/coffee-page.tsx";
 import { EditAppDialog } from "#src/components/edit-app-dialog.tsx";
+import { MacFilterPanel } from "#src/components/mac-filter-panel.tsx";
 import { ServiceProcessControl } from "#src/components/service-process-control.tsx";
 import { UpdatePanel } from "#src/components/update-panel.tsx";
 
@@ -1029,7 +1030,10 @@ export function GuardApp() {
               <span>
                 {snapshot.platform === "darwin" ? "macOS" : "Ubuntu"}{" "}
                 测试版：网页由插件独立阻断。应用仅保护通过 IP Guard
-                或受控启动器启动的实例；原快捷方式不被接管，未提供系统级网络过滤。
+                或受控启动器启动的实例；原快捷方式不被启动拦截。
+                {snapshot.platform === "darwin"
+                  ? "系统网络过滤需完成签名，并在防护设置中单独启用。"
+                  : "当前 Ubuntu 测试版未提供系统级网络过滤。"}
                 {snapshot.processProtection === "managed-cgroup"
                   ? "进程由 systemd 控制组管理。"
                   : "进程按受控进程组管理，另建会话的子进程可能脱离此范围。"}
@@ -1337,6 +1341,7 @@ export function GuardApp() {
                   available={available}
                   onSetup={async () => Boolean(await invoke({ action: "extension:setup" }))}
                 />
+                {snapshot.platform === "darwin" && <MacFilterPanel />}
                 <UpdatePanel />
                 <section className="panel settings-panel">
                   <div className="panel-heading">

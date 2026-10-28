@@ -10,6 +10,7 @@ import type { BrowserBridge } from "#src/main/browser-bridge.ts";
 import type { CoffeeDiagnostics } from "#src/main/coffee.ts";
 import type { Guardian } from "#src/main/guardian.ts";
 import { NativeCommandError } from "#src/main/guardian.ts";
+import { MacNetworkFilter } from "#src/main/mac-filter.ts";
 import { posixAutostart } from "#src/main/posix-autostart.ts";
 import { resolvePosixExecutable } from "#src/main/posix-presets.ts";
 import { applicationPresets } from "#src/main/presets.ts";
@@ -26,6 +27,8 @@ export const setupIpc = (
   updates: ApplicationUpdates,
   browser: BrowserBridge,
 ) => {
+  const macFilter = new MacNetworkFilter(guardian);
+  app.on("before-quit", () => macFilter.stop());
   updates.on("update", (state) => {
     for (const window of BrowserWindow.getAllWindows())
       window.webContents.send(desktopChannels.appUpdate, state);
@@ -47,6 +50,23 @@ export const setupIpc = (
     )
       throw new Error("Untrusted IPC sender");
     const command = commandSchema.parse(input);
+    if (command.action === "mac-filter:status") return { macFilter: await macFilter.status() };
+    if (command.action === "mac-filter:set") {
+      if (process.platform !== "darwin") throw new Error("系统过滤扩展只支持 macOS");
+      const answer = await dialog.showMessageBox({
+        type: "warning",
+        title: "IP Guard 系统网络过滤",
+        message: command.enabled ? "启用选中应用的系统网络过滤？" : "关闭系统网络过滤？",
+        detail: command.enabled
+          ? "此实验功能会按独立 IP 结果过滤已开启防护的应用及其同一应用包内的辅助进程，包括从原快捷方式启动的实例。校验失败或守护失联时拒绝这些应用的新连接和后续数据。需要在 macOS 系统设置中授权；代理代发连接和实际断网效果仍需本机验证。"
+          : "关闭后只保留浏览器插件和受控启动保护，原快捷方式启动的应用恢复普通联网。",
+        buttons: ["取消", command.enabled ? "启用并授权" : "关闭过滤"],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (answer.response !== 1) return { cancelled: true, macFilter: await macFilter.status() };
+      return { macFilter: await macFilter.setEnabled(command.enabled) };
+    }
     if (command.action === "extension:status") return { extension: await browser.status() };
     if (command.action === "extension:setup") {
       await guardian.request("browser:register");

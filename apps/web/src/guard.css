@@ -1535,6 +1535,18 @@ input::placeholder {
 .service-process-stop {
   white-space: nowrap;
 }
+.filter-body {
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+.filter-body p {
+  margin: 0;
+  line-height: 1.6;
+}
+.filter-body button {
+  justify-self: start;
+}
 @media (max-width: 580px) {
   .process-controls {
     width: 100%;

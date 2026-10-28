@@ -43,6 +43,11 @@ export const extensionStatusSchema = z.object({
   error: z.string(),
 });
 export type ExtensionStatus = z.infer<typeof extensionStatusSchema>;
+export const macFilterStateSchema = z.object({
+  phase: z.enum(["unavailable", "disabled", "approval", "enabled", "error"]),
+  message: z.string().max(8192),
+});
+export type MacFilterState = z.infer<typeof macFilterStateSchema>;
 export const claudeIpv4Endpoint = "https://claude.ai/cdn-cgi/trace";
 
 export const desktopBridgeGlobal = "desktop";
@@ -208,6 +213,8 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("process:stop"), service: serviceSchema }),
   z.object({ action: z.literal("logs") }),
   z.object({ action: z.literal("launchers") }),
+  z.object({ action: z.literal("mac-filter:status") }),
+  z.object({ action: z.literal("mac-filter:set"), enabled: z.boolean() }),
   z.object({ action: z.literal("elevate") }),
   z.object({ action: z.literal("restart") }),
   z.object({ action: z.literal("coffee:status"), service: serviceSchema }),
@@ -234,6 +241,7 @@ export const replySchema = z.object({
   processes: processStateSchema.optional(),
   appUpdate: updateStateSchema.optional(),
   extension: extensionStatusSchema.optional(),
+  macFilter: macFilterStateSchema.optional(),
 });
 export type Reply = z.infer<typeof replySchema>;
 export interface DesktopApi {

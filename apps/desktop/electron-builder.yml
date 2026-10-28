@@ -33,9 +33,13 @@ nsis:
   include: scripts/installer.nsh
   artifactName: IP-Guard-Setup-${version}.${ext}
 mac:
-  extraResources: &posixResources
+  extraResources:
     - from: posix
       to: posix
+    - from: mac
+      to: mac-source
+    - from: dist/mac
+      to: mac-build
   identity: "-"
   hardenedRuntime: true
   entitlements: assets/entitlements.mac.plist
@@ -45,7 +49,9 @@ mac:
       arch: [arm64]
   artifactName: IP-Guard-${version}-macOS-${arch}.${ext}
 linux:
-  extraResources: *posixResources
+  extraResources:
+    - from: posix
+      to: posix
   category: Utility
   target:
     - target: deb

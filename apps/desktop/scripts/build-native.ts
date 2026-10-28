@@ -21,6 +21,12 @@ if (process.platform !== "win32") {
     if (checked.status !== 0) throw new Error(`Invalid POSIX runtime: ${filename}`);
   }
   console.log("POSIX guardian and Native Messaging runtime ready");
+  if (process.platform === "darwin") {
+    const swift = spawnSync(process.execPath, [path.join(root, "scripts/build-mac.ts")], {
+      stdio: "inherit",
+    });
+    if (swift.status !== 0) throw swift.error || new Error("macOS filter build failed");
+  }
   process.exit(0);
 }
 const metadata: unknown = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
