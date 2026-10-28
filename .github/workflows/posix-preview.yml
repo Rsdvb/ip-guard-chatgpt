@@ -1,0 +1,56 @@
+name: macOS and Ubuntu preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CI: true
+      E2E_TEST_PORT: 3265
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Browser test runtime
+        run: pnpm --filter @ip-guard/web exec playwright install --with-deps chromium
+      - name: Ubuntu user cgroup session
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Check, build and real OS process tests
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm exec vp run ready 2>&1 | tee posix-validation.log
+          node -p 'JSON.stringify({platform:process.platform,arch:process.arch,node:process.version})' > platform.json
+      - name: Build preview packages
+        run: pnpm exec vp run package:desktop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ip-guard-${{ matrix.os }}
+          retention-days: 14
+          path: |
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.tar.gz
+            apps/web/test-results
+            posix-validation.log
+            platform.json
