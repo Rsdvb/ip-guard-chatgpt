@@ -54,7 +54,8 @@ namespace IpGuard {
                 if(args.Length>0 && args[0]=="elevate-desktop" && e.GetBaseException() is System.ComponentModel.Win32Exception && ((System.ComponentModel.Win32Exception)e.GetBaseException()).NativeErrorCode==1223) return 1223;
                 string error=e.GetBaseException().Message;
                 if(args.Length>0 && args[0]=="guard") { Console.WriteLine(Data.Json().Serialize(new { type="fatal",error=error })); Console.Out.Flush(); }
-                else if(args.Length>0 && (args[0]=="process-inventory" || args[0]=="admin-status" || args[0]=="elevate-desktop" || args[0]=="recover")) Console.Error.WriteLine(error);
+                else if(args.Length>0 && args[0]=="recover") Console.Error.WriteLine(e);
+                else if(args.Length>0 && (args[0]=="process-inventory" || args[0]=="admin-status" || args[0]=="elevate-desktop")) Console.Error.WriteLine(error);
                 else Win32.MessageBox(IntPtr.Zero,error,"IP Guard",0x10);
                 return 1;
             }

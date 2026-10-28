@@ -244,12 +244,14 @@ try {
   testFailure = error;
 }
 try {
-  const recovered = spawnSync(native, ["recover"], { encoding: "utf8", timeout: 30000 });
-  if (recovered.status !== 0)
-    throw (
-      recovered.error ||
-      new Error("Fixture protection recovery failed: " + recovered.stdout + recovered.stderr)
-    );
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const recovered = spawnSync(native, ["recover"], { encoding: "utf8", timeout: 30000 });
+    if (recovered.status !== 0)
+      throw (
+        recovered.error ||
+        new Error("Fixture protection recovery failed: " + recovered.stdout + recovered.stderr)
+      );
+  }
   fixture("remove");
   rmSync(data, { recursive: true, force: true });
   rmSync(directory, { recursive: true, force: true });

@@ -123,6 +123,7 @@ namespace IpGuard {
             dynamic folder = service.GetFolder("\\"); string name = Owner;
             if (!enable) {
                 try { folder.DeleteTask(name, 0); }
+                catch (FileNotFoundException) { }
                 catch (System.Runtime.InteropServices.COMException e) { if ((uint)e.HResult != 0x80070002) throw; }
                 return;
             }
