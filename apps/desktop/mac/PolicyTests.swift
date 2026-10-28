@@ -32,6 +32,9 @@ import Foundation
         fields["sequence"] = 1
         let sequenced = try JSONSerialization.data(withJSONObject: fields)
         try replayStore.update(sequenced, uid: uid, peer: peer, now: 120)
+        var competingRejected = false
+        do { try replayStore.update(sequenced, uid: uid, peer: UUID(), now: 120.5) } catch { competingRejected = true }
+        precondition(competingRejected, "A competing live controller must not replace the active user's policy")
         var replayRejected = false
         do { try replayStore.update(sequenced, uid: uid, peer: peer, now: 121) } catch { replayRejected = true }
         precondition(replayRejected, "A repeated policy revision must not renew a network grant")
