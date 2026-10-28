@@ -61,5 +61,19 @@ if (result.status === 0) {
   );
   if (zip.error) throw zip.error;
   if (zip.status !== 0) throw new Error("Browser extension archive failed");
+  if (
+    process.platform === "win32" &&
+    process.env.GITHUB_ACTIONS === "true" &&
+    process.env.RUNNER_ENVIRONMENT === "github-hosted"
+  ) {
+    const installed = spawnSync(
+      process.execPath,
+      [path.join(root, "scripts/test-windows-installer.ts")],
+      { stdio: "inherit" },
+    );
+    if (installed.error) throw installed.error;
+    if (installed.status !== 0)
+      throw new Error("Windows install, upgrade and uninstall regression failed");
+  }
 }
 process.exitCode = result.status ?? 1;

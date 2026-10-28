@@ -33,7 +33,7 @@
   ${IfNot} ${isUpdated}
   ExecWait '"$INSTDIR\resources\native\${VERSION}\IpGuard.Native.exe" recover' $0
   ${If} $0 != 0
-    MessageBox MB_ICONSTOP "请退出托盘中的 IP Guard，再重新卸载。防护配置尚未解除。"
+    MessageBox MB_ICONSTOP "解除防护失败，卸载已停止。请先从托盘退出 IP Guard；若仍失败，请运行安装目录 resources 中的 recover.cmd 查看具体原因。"
     Abort
   ${EndIf}
   ${EndIf}
