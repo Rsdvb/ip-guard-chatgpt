@@ -66,7 +66,7 @@ jobs:
           $text=[IO.File]::ReadAllText($manifest)
           if(!$text.Contains('requireAdministrator')){throw 'Expected original administrator manifest'}
           [IO.File]::WriteAllText($manifest,$text.Replace('requireAdministrator','asInvoker'),[Text.UTF8Encoding]::new($false))
-          & $mt.FullName '-nologo' ('-manifest:'+$manifest) ('-outputresource:'+$binary+';#1')
+          & $mt.FullName '-nologo' '-manifest' $manifest ('-outputresource:'+$binary+';#1')
           if($LASTEXITCODE -ne 0){throw 'Fixture manifest comparison failed'}
       - name: Direct main and browser inspector probes
         run: node apps/web/tests/platform/windows-inspector-probe.ts
