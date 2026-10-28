@@ -45,3 +45,5 @@ jobs:
         run: |
           xcrun swiftc -swift-version 5 -O -framework AppKit -framework Security apps/desktop/mac/Policy.swift apps/desktop/mac/ProcessMonitor.swift apps/desktop/mac/ProcessMonitorTests.swift -o "$RUNNER_TEMP/mac-process-tests"
           "$RUNNER_TEMP/mac-process-tests"
+      - name: Preserve native CLI entry across application updates
+        run: node --experimental-strip-types apps/desktop/scripts/test-posix-presets.ts
