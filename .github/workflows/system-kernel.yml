@@ -41,3 +41,7 @@ jobs:
         run: |
           xcrun swiftc -swift-version 5 -O -framework NetworkExtension -framework SystemExtensions -framework Security -framework AppKit apps/desktop/mac/Policy.swift apps/desktop/mac/PolicyIPC.swift apps/desktop/mac/ProcessMonitor.swift apps/desktop/mac/FilterControl.swift -o "$RUNNER_TEMP/IpGuardMacControl"
           xcrun swiftc -swift-version 5 -O -framework NetworkExtension -framework SystemExtensions -framework Security apps/desktop/mac/Policy.swift apps/desktop/mac/PolicyIPC.swift apps/desktop/mac/FilterDataProvider.swift apps/desktop/mac/ExtensionMain.swift -o "$RUNNER_TEMP/IPGuardFilter"
+      - name: Real macOS process isolation
+        run: |
+          xcrun swiftc -swift-version 5 -O -framework AppKit -framework Security apps/desktop/mac/Policy.swift apps/desktop/mac/ProcessMonitor.swift apps/desktop/mac/ProcessMonitorTests.swift -o "$RUNNER_TEMP/mac-process-tests"
+          "$RUNNER_TEMP/mac-process-tests"
