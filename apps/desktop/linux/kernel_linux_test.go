@@ -127,6 +127,10 @@ func TestKernelLaunchAndNetworkIsolation(t *testing.T) {
 		{ID: "00000000-0000-4000-8000-000000000072", Service: "chatgpt", Executable: filepath.Join(root, "chatgpt-alias"), Allowed: true, KeepRunning: true},
 	}}
 	var policyMu sync.Mutex
+    duplicate:=policy
+    duplicate.Targets=append([]Target{},policy.Targets...)
+    duplicate.Targets[1].Executable=filepath.Join(root,"claude")
+    if _,err=e.request(Request{Action:"policy",Policy:&duplicate});err==nil {t.Fatal("the same executable inode must not receive two independent service policies through an alias")}
 	publish := func() error {
 		policyMu.Lock()
 		p := policy
