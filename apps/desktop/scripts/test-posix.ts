@@ -146,7 +146,7 @@ try {
   const launcher = path.join(
     options.directory,
     "launchers",
-    `IPGuard-${claudeId}${process.platform === "darwin" ? ".command" : ".sh"}`,
+    `IPGuard-claude-${claudeId}${process.platform === "darwin" ? ".command" : ".sh"}`,
   );
   const cli = spawn("/bin/sh", [launcher], { stdio: "ignore" });
   await until(

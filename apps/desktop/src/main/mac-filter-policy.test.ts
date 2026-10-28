@@ -56,6 +56,17 @@ it("independently authorizes fresh target services and retains deny bindings on 
   expect(policy.targets.map((target) => target.allowed)).toEqual([true, false]);
   expect(policy.targets[0]?.bundleRoot).toBe("/Applications/Claude.app");
   expect(
+    macFilterPolicy(
+      {
+        ...snapshot,
+        apps: snapshot.apps.map((app) => ({ ...app, path: `/usr/local/bin/${app.service}` })),
+      },
+      501,
+      now,
+      [],
+    ).targets,
+  ).toEqual([]);
+  expect(
     macFilterPolicy(snapshot, 501, now + 11000, []).targets.every((target) => !target.allowed),
   ).toBe(true);
   expect(macFilterPolicy(undefined, 501, now, policy.targets).targets).toEqual(

@@ -133,8 +133,10 @@ final class FilterControl: NSObject, OSSystemExtensionRequestDelegate {
 @main enum ControlMain {
     static var retained: FilterControl?
     static func main() {
+        let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let containingApp = executable.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         guard let team = codeTeam(), team.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil,
-              Bundle.main.bundleIdentifier == "com.ip-guard.desktop" else {
+              containingApp.pathExtension == "app", Bundle(url: containingApp)?.bundleIdentifier == "com.ip-guard.desktop" else {
             emit("unavailable", "请先在 Mac 上完成 Developer ID 签名、配置描述文件并安装到 Applications"); exit(0)
         }
         let control = FilterControl(team: team); retained = control

@@ -29,7 +29,7 @@ final class FilterDataProvider: NEFilterDataProvider {
     override func stopFilter(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) { completionHandler() }
 
     private func identity(_ flow: NEFilterFlow) -> FlowIdentity? {
-        guard let token = flow.sourceAppAuditToken, token.count == 32 else { return nil }
+        guard let token = flow.sourceProcessAuditToken ?? flow.sourceAppAuditToken, token.count == 32 else { return nil }
         if let cached = identities.object(forKey: token as NSData) { return cached }
         var code: SecCode?
         let attributes = [kSecGuestAttributeAudit as String: token] as CFDictionary

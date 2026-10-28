@@ -98,6 +98,7 @@ type Connection = {
   started: boolean;
   pid: number;
   stopping: boolean;
+  authorized: boolean;
 };
 
 export class PosixGuardian extends EventEmitter {
@@ -369,7 +370,7 @@ export class PosixGuardian extends EventEmitter {
         void this.check(key);
     }
     for (const item of this.sessions.values()) {
-      if (item.stopping) continue;
+      if (item.stopping || !item.authorized) continue;
       if (!this.canContinue(item.service)) this.stopConnection(item);
       else if (item.socket.writable) item.socket.write(JSON.stringify({ type: "lease" }) + "\n");
     }
@@ -464,6 +465,7 @@ export class PosixGuardian extends EventEmitter {
       started: false,
       pid: 0,
       stopping: false,
+      authorized: false,
     });
     this.launchState(target.id, "starting", "正在核对该服务出口 IPv4");
     if (!target.enabled) throw new Error("请先开启该程序防护");
@@ -486,6 +488,10 @@ export class PosixGuardian extends EventEmitter {
     )
       throw new Error("启动校验结果已失效，请重试");
     socket.setTimeout(0);
+    const connection = this.sessions.get(target.id);
+    if (!connection || connection.socket !== socket || connection.stopping)
+      throw new Error("本次启动已取消");
+    connection.authorized = true;
     socket.write(
       JSON.stringify({
         type: "launch",
@@ -532,13 +538,17 @@ export class PosixGuardian extends EventEmitter {
         );
     }
   }
+  private launcherPath(target: ProtectedApp) {
+    return path.join(
+      this.options.directory,
+      "launchers",
+      `IPGuard-${target.service}-${target.id}${process.platform === "darwin" ? ".command" : ".sh"}`,
+    );
+  }
   private async launcher(target: ProtectedApp, enabled: boolean) {
     const folder = path.join(this.options.directory, "launchers");
     await privateDirectory(folder);
-    const filename = path.join(
-      folder,
-      `IPGuard-${target.id}${process.platform === "darwin" ? ".command" : ".sh"}`,
-    );
+    const filename = this.launcherPath(target);
     if (!enabled) {
       await unlink(filename).catch((error: unknown) => {
         if (!fileMissing(error)) throw error;
@@ -672,6 +682,51 @@ export class PosixGuardian extends EventEmitter {
         throw new Error("该程序已在启动或运行");
       if (!target.enabled) throw new Error("请先开启该程序防护");
       this.launchState(target.id, "starting", "正在连接受控启动器");
+      const consoleApp =
+        !target.path.includes(".app/Contents/") &&
+        (path.basename(target.path).toLowerCase() === "claude" ||
+          target.path.includes("/@anthropic-ai/claude-code/"));
+      if (consoleApp) {
+        const terminal =
+          process.platform === "darwin" ? "/usr/bin/open" : "/usr/bin/x-terminal-emulator";
+        try {
+          await access(terminal, constants.X_OK);
+        } catch {
+          this.launchState(
+            target.id,
+            "failed",
+            `未找到终端，请在终端执行：${this.launcherPath(target)}`,
+          );
+          return this.snapshot;
+        }
+        const args =
+          process.platform === "darwin"
+            ? ["-a", "Terminal", this.launcherPath(target)]
+            : ["-e", this.launcherPath(target)];
+        const child = spawn(terminal, args, { stdio: "ignore" });
+        child.once("error", (error) => this.launchState(target.id, "failed", error.message));
+        child.once("exit", (code) => {
+          if (code !== 0)
+            this.launchState(
+              target.id,
+              "failed",
+              `终端启动失败，请执行：${this.launcherPath(target)}`,
+            );
+        });
+        const timer = setTimeout(() => {
+          if (
+            !this.sessions.has(target.id) &&
+            this.snapshot.launches.find((item) => item.id === target.id)?.phase === "starting"
+          )
+            this.launchState(
+              target.id,
+              "failed",
+              `终端尚未连接，请执行：${this.launcherPath(target)}`,
+            );
+        }, 30000);
+        timer.unref();
+        return this.snapshot;
+      }
       const log = openSync(path.join(this.options.directory, `app-${target.id}.log`), "a", 0o600);
       try {
         const child = spawn(

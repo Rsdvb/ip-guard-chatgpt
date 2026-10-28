@@ -56,9 +56,9 @@ export function MacFilterPanel() {
       <div className="filter-body">
         <p role="status">{state.message}</p>
         <p className="field-hint">
-          完成 Developer ID
-          签名和描述文件配置后，可过滤已开启防护的应用包，包括从原快捷方式启动的实例。按
-          Claude／ChatGPT 各自的 IP
+          完成 Developer ID 签名和描述文件配置后，可过滤已开启防护的 .app
+          应用包，包括从原快捷方式启动的实例。CLI
+          和解释器脚本继续使用受控启动，不纳入此系统过滤器。按 Claude／ChatGPT 各自的 IP
           结果授权；守护失联或许可过期时拒绝已登记应用的网络。此功能不拦截应用本身的启动，代理代发连接及真实网络切换仍需本机验证。
         </p>
         <p className="field-hint">

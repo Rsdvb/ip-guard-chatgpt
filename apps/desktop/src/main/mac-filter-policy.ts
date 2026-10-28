@@ -35,6 +35,7 @@ export function macFilterPolicy(
               age <= (rule.settings.intervalSeconds + 8) * 1000,
           };
         })
+        .filter((target) => target.bundleRoot !== null)
     : previous.map((target) => ({ ...target, allowed: false }));
   return { format: 1, uid, targets };
 }
