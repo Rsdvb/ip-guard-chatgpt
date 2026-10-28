@@ -5,6 +5,7 @@ import {
   allServiceDomains,
   offlineBrowserPermission,
   shouldBlockUrl,
+  isNewerExtensionVersion,
 } from "@ip-guard/electron";
 import type { BrowserState } from "@ip-guard/electron";
 
@@ -21,6 +22,8 @@ let lastHeartbeat = 0;
 let reconnect: ReturnType<typeof setTimeout> | undefined;
 let queue = Promise.resolve();
 let permittedDomains = "";
+let scannedPolicy: string | undefined;
+let badge = "";
 const fresh = () => Date.now() - lastHeartbeat >= 0 && Date.now() - lastHeartbeat < 3500;
 const offline = (reason: string): BrowserState => ({
   ...state,
@@ -45,7 +48,7 @@ async function blockTabs() {
     }),
   );
 }
-function publish() {
+function publish(scan = false) {
   queue = queue
     .then(async () => {
       const permit = allowed();
@@ -71,10 +74,24 @@ function publish() {
         });
         permittedDomains = policy;
       }
-      await blockTabs();
+      if (scan || scannedPolicy !== policy) {
+        await blockTabs();
+        scannedPolicy = policy;
+      }
       await chrome.storage.session.set({ state, receivedAt: Date.now() });
-      await chrome.action.setBadgeText({ text: permit ? "" : "!" });
-      await chrome.action.setBadgeBackgroundColor({ color: permit ? "#137e51" : "#a6691a" });
+      const latest = state.latestExtensionVersion ?? state.appVersion;
+      const update = isNewerExtensionVersion(latest, chrome.runtime.getManifest().version);
+      const signature = `${permit}:${update}:${latest}`;
+      if (badge !== signature) {
+        await chrome.action.setBadgeText({ text: !permit ? "!" : update ? "↑" : "" });
+        await chrome.action.setBadgeBackgroundColor({
+          color: permit && !update ? "#137e51" : "#a6691a",
+        });
+        await chrome.action.setTitle({
+          title: `IP Guard${permit ? "" : " · 访问已阻断"}${update ? ` · 插件有更新 v${latest}` : ""}`,
+        });
+        badge = signature;
+      }
     })
     .catch(async (error: unknown) => {
       state = offline(error instanceof Error ? error.message : "浏览器规则更新失败");
@@ -84,6 +101,7 @@ function publish() {
         .updateSessionRules({ removeRuleIds: [100] })
         .catch(() => undefined);
       permittedDomains = "";
+      scannedPolicy = undefined;
       await blockTabs();
       await chrome.storage.session.set({ state, receivedAt: Date.now() });
     });
@@ -117,7 +135,11 @@ function connect() {
     void publish();
     reconnect = setTimeout(connect, 3000);
   });
-  next.postMessage({ action: "watch", protocol: 3 });
+  next.postMessage({
+    action: "watch",
+    protocol: 3,
+    extensionVersion: chrome.runtime.getManifest().version,
+  });
 }
 chrome.runtime.onMessage.addListener((input: unknown, sender, reply) => {
   if (sender.id !== chrome.runtime.id || !input || typeof input !== "object") return;
@@ -130,7 +152,7 @@ chrome.runtime.onMessage.addListener((input: unknown, sender, reply) => {
   }
 });
 chrome.tabs.onUpdated.addListener((_id, change) => {
-  if (change.url && shouldBlockUrl(change.url, state, fresh())) void publish();
+  if (change.url && shouldBlockUrl(change.url, state, fresh())) void publish(true);
 });
 chrome.alarms.onAlarm.addListener(() => {
   if (!port) connect();

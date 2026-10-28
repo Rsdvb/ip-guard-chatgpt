@@ -34,6 +34,7 @@ namespace IpGuard {
         AdapterInfo[] adapters=new AdapterInfo[0];
         AdapterInfo watchedAdapter=new AdapterInfo { id="",name="正在检测网卡",exists=false };
         volatile bool quit;
+        readonly AutoResetEvent networkWake=new AutoResetEvent(false);
         string topology="",detection="";
         static string ServiceName(string service) { return service=="claude" ? "Claude" : "ChatGPT"; }
         IEnumerable<Session> AllSessions { get { return runtimes.Values.SelectMany(r=>r.sessions); } }
@@ -69,7 +70,7 @@ namespace IpGuard {
             bool changed;
             lock(state) {
                 changed = detection != message; detection = message;
-                if(networkChanged) foreach(ServiceRuntime r in runtimes.Values) Interlocked.Exchange(ref r.checkRequested,1);
+                if(networkChanged) foreach(ServiceRuntime r in runtimes.Values) { Interlocked.Exchange(ref r.checkRequested,1); r.wake.Set(); }
             }
             if(changed) { if(!networkChanged) Log("info",message); Publish(); }
         }
@@ -294,12 +295,12 @@ namespace IpGuard {
             while(!quit) {
                 try {
                     if(Monitor.TryEnter(r.gate)) {
-                        try { if(DateTime.UtcNow>=r.nextCheck || Interlocked.CompareExchange(ref r.checkRequested,0,0)==1) CheckLocked(service); }
+                        try { Rule rule=config.services[service]; if(rule.enabled && rule.rulesLocked && (DateTime.UtcNow>=r.nextCheck || Interlocked.CompareExchange(ref r.checkRequested,0,0)==1)) CheckLocked(service); }
                         finally { Monitor.Exit(r.gate); }
                     }
                     if(Monitor.TryEnter(actions)) { try { BlockPending(); } finally { Monitor.Exit(actions); } }
                 } catch(Exception e) { Observe(ServiceName(service)+" · 守护状态检测异常 · "+e.GetBaseException().Message); }
-                Thread.Sleep(200);
+                r.wake.WaitOne(500);
             }
         }
         void WatchNetwork() {
@@ -311,7 +312,8 @@ namespace IpGuard {
                     if(prior!="" && now!=prior) Observe("本机 IPv4 或路由配置更新，正在复核服务出口",true);
                     wifi.Ensure();
                 } catch(Exception e) { Observe("网络状态检测异常 · " + e.Message); }
-                Thread.Sleep(500);
+                networkWake.WaitOne(60000);
+                if(!quit) Thread.Sleep(250);
             }
         }
         void RefreshAdapters() {
@@ -483,7 +485,7 @@ namespace IpGuard {
         }
         void NetworkChanged(object sender,EventArgs e) { RequestNetworkCheck(); }
         void AvailabilityChanged(object sender,NetworkAvailabilityEventArgs e) { RequestNetworkCheck(); }
-        void RequestNetworkCheck() { foreach(ServiceRuntime r in runtimes.Values) Interlocked.Exchange(ref r.checkRequested,1); }
+        void RequestNetworkCheck() { networkWake.Set(); }
         void PowerChanged(object sender,PowerModeChangedEventArgs e) { Observe("系统电源状态改变",true); }
     }
 }

@@ -28,8 +28,8 @@ final class FilterDataProvider: NEFilterDataProvider {
     }
     override func stopFilter(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) { completionHandler() }
 
-    private func identity(_ flow: NEFilterFlow) -> FlowIdentity? {
-        guard let token = flow.sourceProcessAuditToken ?? flow.sourceAppAuditToken, token.count == 32 else { return nil }
+    private func identity(_ candidate: Data?) -> FlowIdentity? {
+        guard let token = candidate, token.count == 32 else { return nil }
         if let cached = identities.object(forKey: token as NSData) { return cached }
         var code: SecCode?
         let attributes = [kSecGuestAttributeAudit as String: token] as CFDictionary
@@ -43,8 +43,17 @@ final class FilterDataProvider: NEFilterDataProvider {
         identities.setObject(result, forKey: token as NSData); return result
     }
     private func decision(_ flow: NEFilterFlow) -> FilterDecision {
-        guard let value = identity(flow) else { return store.hasTargets ? .block : .unmanaged }
-        return store.decision(path: value.path, uid: value.uid, now: ProcessInfo.processInfo.systemUptime)
+        if let value = identity(flow.sourceProcessAuditToken) {
+            let result = store.decision(path: value.path, uid: value.uid, now: continuousNow())
+            if result != .unmanaged { return result }
+        }
+        if let value = identity(flow.sourceAppAuditToken) {
+            let result = store.decision(path: value.path, uid: value.uid, now: continuousNow())
+            if result != .unmanaged { return result }
+        }
+        guard let token = flow.sourceAppAuditToken ?? flow.sourceProcessAuditToken, token.count == 32 else { return .unmanaged }
+        let uid = token.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt32.self) }
+        return store.unidentifiedApp(identifier: flow.sourceAppIdentifier, uid: uid)
     }
     override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
         switch decision(flow) {

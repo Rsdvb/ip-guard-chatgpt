@@ -126,8 +126,9 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
           group.items = group.items.map((item) =>
             unknown(item.id, item.label, `等待 ${this.name} 出口重新检测`),
           );
-      if (this.report.phase === "complete") this.refresh();
+      if (this.report.phase === "complete" && this.timer) this.refresh();
       else if (
+        this.timer &&
         this.report.phase === "running" &&
         this.collectingIp &&
         this.collectingIp !== result.ip
@@ -154,9 +155,16 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
     { label: string; status: number; ms: number; error?: string }
   >();
   start() {
-    this.refresh();
+    if (this.timer || this.stopped) return;
+    if (!this.report.checkedAt || Date.now() - Date.parse(this.report.checkedAt) >= 300000)
+      this.refresh();
     this.timer = setInterval(() => this.refresh(), 300000);
     this.timer.unref();
+  }
+  pause() {
+    clearInterval(this.timer);
+    this.timer = undefined;
+    this.refreshAfterRun = false;
   }
   stop() {
     this.stopped = true;
@@ -278,7 +286,7 @@ export class CoffeeDiagnostics extends EventEmitter<{ update: [CoffeeReport] }> 
         this.report.phase = "complete";
         this.report.checkedAt = new Date().toISOString();
         this.publish();
-        if (this.refreshAfterRun && !this.stopped) {
+        if (this.refreshAfterRun && this.timer && !this.stopped) {
           this.refreshAfterRun = false;
           this.refresh();
         }

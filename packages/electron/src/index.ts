@@ -4,8 +4,9 @@ import { serviceSchema } from "./services.ts";
 export { formatIPText } from "./ip-display.ts";
 export * from "./services.ts";
 export * from "./browser-policy.ts";
+export * from "./extension-version.ts";
 
-export const nativeVersion = "0.13.0";
+export const nativeVersion = "0.14.0";
 export const nativeProtocol = 10;
 export const browserExtensionId = "blmgamidelconfabgilaacbkokomegep";
 export const browserHostName = "com.ipguard.browser";
@@ -26,6 +27,7 @@ export type BrowserPermission = z.infer<typeof browserPermissionSchema>;
 export const browserStateSchema = z.object({
   protocol: z.literal(3),
   appVersion: z.string(),
+  latestExtensionVersion: z.string().optional(),
   services: z.object({ claude: browserPermissionSchema, chatgpt: browserPermissionSchema }),
 });
 export type BrowserState = z.infer<typeof browserStateSchema>;
@@ -40,14 +42,28 @@ export const extensionStatusSchema = z.object({
   phase: z.enum(["running", "installed", "missing", "unknown"]),
   installedBrowsers: z.array(z.enum(["Chrome", "Edge"])),
   connections: z.number().int().nonnegative(),
+  latestVersion: z.string().optional(),
+  outdatedBrowsers: z.array(z.enum(["Chrome", "Edge"])).optional(),
+  outdatedConnections: z.number().int().nonnegative().optional(),
   error: z.string(),
 });
 export type ExtensionStatus = z.infer<typeof extensionStatusSchema>;
-export const macFilterStateSchema = z.object({
+export const systemProtectionStateSchema = z.object({
   phase: z.enum(["unavailable", "disabled", "approval", "enabled", "error"]),
   message: z.string().max(8192),
+  active: z.boolean().optional(),
 });
-export type MacFilterState = z.infer<typeof macFilterStateSchema>;
+export type SystemProtectionState = z.infer<typeof systemProtectionStateSchema>;
+export const systemProcessSchema = z.object({
+  id: z.uuid(),
+  service: serviceSchema,
+  pid: z.number().int().positive(),
+});
+export type SystemProcess = z.infer<typeof systemProcessSchema>;
+export const systemProtectionFrameSchema = systemProtectionStateSchema.extend({
+  running: z.array(systemProcessSchema).max(8192).optional(),
+  sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+});
 export const claudeIpv4Endpoint = "https://claude.ai/cdn-cgi/trace";
 
 export const desktopBridgeGlobal = "desktop";
@@ -130,6 +146,7 @@ export const appSchema = z.object({
   path: z.string().min(4).max(1024),
   arguments: z.string().max(4096),
   enabled: z.boolean(),
+  nativeExecutable: z.boolean().optional(),
 });
 export const logSchema = z.object({
   time: z.string(),
@@ -163,6 +180,7 @@ export const snapshotSchema = z.object({
   admin: z.boolean(),
   platform: z.enum(["win32", "darwin", "linux"]).optional(),
   processProtection: z.enum(["system", "managed-group", "managed-cgroup"]).optional(),
+  systemProtection: systemProtectionStateSchema.optional(),
   nativeVersion: z.literal(nativeVersion),
   services: z.object({ claude: serviceSnapshotSchema, chatgpt: serviceSnapshotSchema }),
   detection: z.string(),
@@ -213,8 +231,8 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("process:stop"), service: serviceSchema }),
   z.object({ action: z.literal("logs") }),
   z.object({ action: z.literal("launchers") }),
-  z.object({ action: z.literal("mac-filter:status") }),
-  z.object({ action: z.literal("mac-filter:set"), enabled: z.boolean() }),
+  z.object({ action: z.literal("system:status") }),
+  z.object({ action: z.literal("system:set"), enabled: z.boolean() }),
   z.object({ action: z.literal("elevate") }),
   z.object({ action: z.literal("restart") }),
   z.object({ action: z.literal("coffee:status"), service: serviceSchema }),
@@ -241,7 +259,7 @@ export const replySchema = z.object({
   processes: processStateSchema.optional(),
   appUpdate: updateStateSchema.optional(),
   extension: extensionStatusSchema.optional(),
-  macFilter: macFilterStateSchema.optional(),
+  systemProtection: systemProtectionStateSchema.optional(),
 });
 export type Reply = z.infer<typeof replySchema>;
 export interface DesktopApi {

@@ -7,6 +7,7 @@ import {
   appendFile,
   chmod,
   readFile,
+  open,
   realpath,
   rename,
   stat,
@@ -35,6 +36,8 @@ import type {
   Service,
   ServiceSnapshot,
   Snapshot,
+  SystemProtectionState,
+  SystemProcess,
 } from "@ip-guard/electron";
 
 import { registerPosixBrowser } from "./posix-browser.ts";
@@ -122,7 +125,11 @@ export class PosixGuardian extends EventEmitter {
   private timer: ReturnType<typeof setInterval> | undefined;
   private closed = false;
   private topology = "";
+  private nextAdapters = 0;
+  private adapterState = "";
+  private published = "";
   private cgroups = false;
+  private systemProcesses: SystemProcess[] = [];
   readonly endpoint = path.join(posixSocketDirectory(), "control.sock");
   private probe: Pick<ProtectionProbe, "check">;
   private options: { directory: string; executable: string; resources: string };
@@ -197,6 +204,8 @@ export class PosixGuardian extends EventEmitter {
       });
     });
     await chmod(this.endpoint, 0o600);
+    for (const target of this.config.apps)
+      target.nativeExecutable = await this.nativeExecutable(target.path);
     for (const target of this.config.apps.filter((item) => item.enabled))
       await this.launcher(target, true);
     try {
@@ -228,7 +237,15 @@ export class PosixGuardian extends EventEmitter {
   }
   private publish() {
     this.snapshot.apps = this.config.apps;
-    this.snapshot.running = [...this.sessions].filter(([, item]) => item.started).map(([id]) => id);
+    this.snapshot.running = [
+      ...new Set([
+        ...[...this.sessions].filter(([, item]) => item.started).map(([id]) => id),
+        ...this.systemProcesses.map((item) => item.id),
+      ]),
+    ].sort();
+    const value = JSON.stringify(this.snapshot);
+    if (value === this.published) return;
+    this.published = value;
     this.emit("snapshot", this.snapshot);
   }
   private log(level: "info" | "warning" | "error", text: string) {
@@ -324,7 +341,9 @@ export class PosixGuardian extends EventEmitter {
     }
   }
   private refreshAdapters() {
-    const adapters = Object.entries(networkInterfaces())
+    this.nextAdapters = performance.now() + 5000;
+    const interfaces = networkInterfaces();
+    const adapters = Object.entries(interfaces)
       .filter(([, values]) => values?.some((value) => !value.internal))
       .map(([name, values]) => ({
         id: name,
@@ -335,7 +354,7 @@ export class PosixGuardian extends EventEmitter {
         error: "",
       }));
     const fingerprint = JSON.stringify(
-      Object.entries(networkInterfaces())
+      Object.entries(interfaces)
         .flatMap(([name, values]) =>
           (values ?? [])
             .filter((value) => value.family === "IPv4" && !value.internal)
@@ -358,14 +377,20 @@ export class PosixGuardian extends EventEmitter {
         ipv4: false,
         error: "仅作诊断，不以网卡通知直接判定 IP 改变",
       };
+    const state = JSON.stringify([adapters, this.snapshot.watchedAdapter]);
+    const changed = this.adapterState !== state;
+    this.adapterState = state;
+    return changed;
   }
   private tick() {
     if (this.closed) return;
-    this.refreshAdapters();
+    let changed = performance.now() >= this.nextAdapters && this.refreshAdapters();
     for (const key of serviceKeys) {
       const rule = this.snapshot.services[key];
-      if (rule.ready && !this.fresh(key))
+      if (rule.ready && !this.fresh(key)) {
         this.unavailable(key, "服务出口结果已过期，未确认 IP 变化");
+        changed = true;
+      }
       if (rule.enabled && rule.rulesLocked && performance.now() >= this.nextCheck[key])
         void this.check(key);
     }
@@ -374,7 +399,7 @@ export class PosixGuardian extends EventEmitter {
       if (!this.canContinue(item.service)) this.stopConnection(item);
       else if (item.socket.writable) item.socket.write(JSON.stringify({ type: "lease" }) + "\n");
     }
-    this.publish();
+    if (changed) this.publish();
   }
   private target(id: string) {
     const target = this.config.apps.find((item) => item.id === id);
@@ -505,11 +530,60 @@ export class PosixGuardian extends EventEmitter {
   private async executable(filename: string) {
     if (!path.isAbsolute(filename)) throw new Error("请选择可执行文件的绝对路径");
     const file = await realpath(filename);
+    if (
+      /^(?:sh|bash|dash|zsh|fish|sudo|su|pkexec|systemd|systemctl|login|sshd|node|nodejs|python(?:\d+(?:\.\d+)*)?|ruby|perl|osascript|launchctl|open|kill|killall|x-terminal-emulator)$/.test(
+        path.basename(file),
+      )
+    )
+      throw new Error("请选择应用本身；系统、终端和通用解释器保留普通启动方式");
     if (!(await stat(file)).isFile()) throw new Error("请选择应用中的实际可执行文件");
     await access(file, constants.X_OK);
     if (file === (await realpath(this.options.executable)))
       throw new Error("不能把 IP Guard 自身作为受保护程序");
     return file;
+  }
+  private async nativeExecutable(filename: string) {
+    try {
+      const file = await open(filename, "r");
+      try {
+        const header = Buffer.alloc(4);
+        const { bytesRead } = await file.read(header, 0, 4, 0);
+        return (
+          bytesRead === 4 &&
+          [
+            "7f454c46",
+            "cffaedfe",
+            "feedfacf",
+            "cefaedfe",
+            "feedface",
+            "cafebabe",
+            "bebafeca",
+            "cafebabf",
+            "bfbafeca",
+          ].includes(header.toString("hex"))
+        );
+      } finally {
+        await file.close();
+      }
+    } catch {
+      return false;
+    }
+  }
+  setSystemProtection(state: SystemProtectionState, running: SystemProcess[]) {
+    this.snapshot.systemProtection = state;
+    this.systemProcesses = state.active
+      ? running.filter((item) =>
+          this.config.apps.some(
+            (target) => target.id === item.id && target.enabled && target.service === item.service,
+          ),
+        )
+      : [];
+    this.snapshot.processProtection = state.active
+      ? "system"
+      : this.cgroups
+        ? "managed-cgroup"
+        : "managed-group";
+    this.publish();
   }
   private async requireClosed(filename: string) {
     const result = await run("/bin/ps", ["-ww", "-ax", "-o", "uid=,pid=,comm="], {
@@ -637,8 +711,12 @@ export class PosixGuardian extends EventEmitter {
       parsePosixArguments(command.app.arguments);
       if (command.app.enabled && !this.snapshot.services[command.app.service].rulesLocked)
         throw new Error("请先锁定该服务 IP");
-      this.config.apps.push(command.app);
-      await this.launcher(command.app, command.app.enabled);
+      const app = {
+        ...command.app,
+        nativeExecutable: await this.nativeExecutable(command.app.path),
+      };
+      this.config.apps.push(app);
+      await this.launcher(app, app.enabled);
       await this.save();
     } else if (command.action === "edit") {
       const target = this.target(command.id);
@@ -658,6 +736,7 @@ export class PosixGuardian extends EventEmitter {
       if (command.enabled) {
         const executable = await this.executable(target.path);
         await this.requireClosed(executable);
+        target.nativeExecutable = await this.nativeExecutable(target.path);
       } else {
         const item = this.sessions.get(target.id);
         if (item) this.stopConnection(item);
@@ -771,13 +850,18 @@ export class PosixGuardian extends EventEmitter {
     const items = [...this.sessions.values()].filter(
       (item) => item.service === key && item.started,
     );
-    const count = items.length;
+    const count = new Set([
+      ...items.map((item) => item.pid),
+      ...this.systemProcesses.filter((item) => item.service === key).map((item) => item.pid),
+    ]).size;
     return {
       service: key,
       phase: count ? "running" : "stopped",
       count,
-      canStop: items.some((item) => !item.stopping),
-      message: "仅统计由 IP Guard 或受控启动器启动的实例，不接管其他程序",
+      canStop: count > 0,
+      message: this.snapshot.systemProtection?.active
+        ? "系统防护与受控启动的当前用户实例"
+        : "仅统计由 IP Guard 或受控启动器启动的实例，不接管其他程序",
       checkedAt: new Date().toISOString(),
     };
   }

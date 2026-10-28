@@ -7,7 +7,7 @@ import { createInterface } from "node:readline";
 import { app } from "electron";
 import { z } from "zod";
 
-import type { Snapshot } from "@ip-guard/electron";
+import type { Snapshot, SystemProtectionState, SystemProcess } from "@ip-guard/electron";
 import { nativeProtocol, nativeVersion, snapshotSchema, serviceSchema } from "@ip-guard/electron";
 import type { Service } from "@ip-guard/electron";
 
@@ -318,6 +318,9 @@ export class Guardian extends EventEmitter {
   }
   managedProcessStatus(service: Service) {
     return this.posix?.processStatus(service);
+  }
+  setSystemProtection(state: SystemProtectionState, running: SystemProcess[]) {
+    this.posix?.setSystemProtection(state, running);
   }
   stopManagedService(service: Service) {
     return this.posix?.stopService(service);

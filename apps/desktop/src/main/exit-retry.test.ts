@@ -69,3 +69,19 @@ it("does not retry after cancellation or deadline expiry", async () => {
     expect(calls).toBe(1);
   }
 });
+it("recovers from several rapid TUN interruptions without extending the six second budget", async () => {
+  let now = 0,
+    calls = 0;
+  const value = await readServiceExit(
+    async () => {
+      calls++;
+      now += 40;
+      return result(calls === 3 ? "8.8.8.8" : "", calls === 3 ? 200 : 0);
+    },
+    () => true,
+    () => now,
+  );
+  expect(calls).toBe(3);
+  expect(value.ip).toBe("8.8.8.8");
+  expect(value.ms).toBeLessThanOrEqual(6000);
+});

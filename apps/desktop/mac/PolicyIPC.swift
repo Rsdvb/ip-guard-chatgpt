@@ -34,7 +34,7 @@ final class PolicySession: NSObject, IPGuardPolicyChannel {
     let store: PolicyStore
     init(uid: UInt32, store: PolicyStore) { self.uid = uid; self.store = store }
     func update(_ data: Data, reply: @escaping (Bool) -> Void) {
-        do { try store.update(data, uid: uid, peer: peer, now: ProcessInfo.processInfo.systemUptime); reply(true) }
+        do { try store.update(data, uid: uid, peer: peer, now: continuousNow()); reply(true) }
         catch { reply(false) }
     }
     func ping(_ reply: @escaping (Bool) -> Void) { reply(true) }

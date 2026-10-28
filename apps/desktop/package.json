@@ -1,8 +1,8 @@
 {
   "name": "@ip-guard/desktop",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
-  "description": "Windows application IPv4 launch gate and network guardian",
+  "description": "Independent Claude and ChatGPT IPv4 application and browser protection",
   "homepage": "https://github.com/Rsdvb/ip-guard-chatgpt",
   "author": {
     "name": "Rsdvb",

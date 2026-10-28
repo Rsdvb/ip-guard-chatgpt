@@ -8,13 +8,17 @@ namespace IpGuard {
         [MTAThread] public static int Main(string[] args) {
             if(args.Length>0 && args[0].StartsWith("chrome-extension://",StringComparison.Ordinal)) return BrowserHost.Run(args[0]);
             try {
-                if(args.Length>0 && (args[0]=="guard" || args[0]=="version" || args[0]=="notice")) {
+                if(args.Length>0 && (args[0]=="guard" || args[0]=="version" || args[0]=="notice" || args[0]=="process-inventory")) {
                     Console.SetIn(new StreamReader(Console.OpenStandardInput(),new UTF8Encoding(false)));
                     Console.SetOut(new StreamWriter(Console.OpenStandardOutput(),new UTF8Encoding(false)) { AutoFlush=true });
                     Console.SetError(new StreamWriter(Console.OpenStandardError(),new UTF8Encoding(false)) { AutoFlush=true });
                 }
                 if(args.Length>0 && args[0]=="version") {
                     Console.WriteLine(Data.Json().Serialize(new { version=BuildInfo.Version,protocol=BuildInfo.Protocol })); return 0;
+                }
+                if(args.Length==2 && args[0]=="process-inventory") {
+                    uint controller; if(!UInt32.TryParse(args[1],out controller) || controller==0) throw new Exception("进程查询参数无效");
+                    Console.WriteLine(Data.Json().Serialize(ProcessInventory.Read(controller))); return 0;
                 }
                 if(args.Length==1 && args[0]=="notice") return ProtectionNotice.Run();
                 if(args.Length>0 && (args[0]=="gate" || args[0]=="package-gate")) {
@@ -43,6 +47,7 @@ namespace IpGuard {
             } catch(Exception e) {
                 string error=e.GetBaseException().Message;
                 if(args.Length>0 && args[0]=="guard") { Console.WriteLine(Data.Json().Serialize(new { type="fatal",error=error })); Console.Out.Flush(); }
+                else if(args.Length>0 && args[0]=="process-inventory") Console.Error.WriteLine(error);
                 else Win32.MessageBox(IntPtr.Zero,error,"IP Guard",0x10);
                 return 1;
             }

@@ -6,7 +6,7 @@ import Foundation
         let store = PolicyStore(), peer = UUID()
         let claude = FilterTarget(id: UUID().uuidString, service: "claude", executable: "/Applications/Claude.app/Contents/MacOS/Claude", bundleRoot: "/Applications/Claude.app", allowed: true)
         let gpt = FilterTarget(id: UUID().uuidString, service: "chatgpt", executable: "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", bundleRoot: "/Applications/ChatGPT.app", allowed: false)
-        let policy = FilterPolicy(format: 1, uid: uid, targets: [claude, gpt])
+        let policy = FilterPolicy(format: 1, uid: uid, targets: [claude, gpt], sequence: 1)
         let data = try JSONEncoder().encode(policy)
         try store.update(data, uid: uid, peer: peer, now: 100)
         precondition(store.decision(path: claude.executable, uid: uid, now: 101) == .allow)
@@ -18,7 +18,8 @@ import Foundation
         var wrongUID = false
         do { try store.update(data, uid: 502, peer: peer, now: 100) } catch { wrongUID = true }
         precondition(wrongUID)
-        try store.update(data, uid: uid, peer: peer, now: 110)
+        var renewed = policy; renewed.sequence = 2
+        try store.update(try JSONEncoder().encode(renewed), uid: uid, peer: peer, now: 110)
         store.disconnected(uid: uid, peer: UUID())
         precondition(store.decision(path: claude.executable, uid: uid, now: 111) == .allow)
         store.disconnected(uid: uid, peer: peer)

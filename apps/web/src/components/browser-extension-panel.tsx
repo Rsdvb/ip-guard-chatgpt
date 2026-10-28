@@ -107,6 +107,15 @@ export function BrowserExtensionPanel({
           </button>
         </div>
       </div>
+      {(Boolean(status.outdatedConnections) || Boolean(status.outdatedBrowsers?.length)) && (
+        <div className="extension-guide" role="status">
+          <strong>浏览器插件有更新{status.latestVersion ? ` v${status.latestVersion}` : ""}</strong>
+          <p>
+            打开扩展文件夹更新文件，然后在 Chrome / Edge
+            扩展管理页点击「重新加载」。桌面版升级不会自动重新加载浏览器插件。
+          </p>
+        </div>
+      )}
       {(status.phase === "missing" || guide) && (
         <div className="extension-guide">
           <ol>

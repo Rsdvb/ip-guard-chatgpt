@@ -23,6 +23,9 @@ func TestIndependentPolicyAndInputBoundary(t *testing.T) {
 			t.Fatal("invalid command accepted", bad)
 		}
 	}
+	if _, err := decodeRequest([]byte(`{"action":"stop","id":"00000000-0000-4000-8000-000000000001","service":"chatgpt"}`), 1000); err == nil {
+		t.Fatal("ambiguous stop scope accepted")
+	}
 	p.Targets[1].Executable = p.Targets[0].Executable
 	if validatePolicy(p, 1000) == nil {
 		t.Fatal("same executable authorized by two services")

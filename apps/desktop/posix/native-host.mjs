@@ -9,6 +9,7 @@ if (
   process.exit(1);
 let input = Buffer.alloc(0),
   connected = false,
+  extensionVersion = "",
   socket;
 const offline = {
   phase: "offline",
@@ -38,12 +39,21 @@ process.stdin.on("data", (chunk) => {
   try {
     const request = JSON.parse(input.subarray(4).toString("utf8"));
     if (!request || request.action !== "watch" || request.protocol !== 3) return finish();
+    extensionVersion = request.extensionVersion ?? "";
+    if (
+      typeof extensionVersion !== "string" ||
+      (extensionVersion !== "" &&
+        (!/^\d{1,5}(?:\.\d{1,5}){1,3}$/.test(extensionVersion) ||
+          extensionVersion.split(".").some((part) => Number(part) > 65535)))
+    )
+      return finish();
   } catch {
     return finish();
   }
   connected = true;
   input = Buffer.alloc(0);
   socket = createConnection(endpoint);
+  socket.on("connect", () => socket.write(JSON.stringify({ extensionVersion }) + "\n"));
   let lines = "";
   socket.setEncoding("utf8");
   socket.setTimeout(2500, () => socket.destroy(new Error("Heartbeat expired")));

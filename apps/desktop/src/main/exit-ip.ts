@@ -77,7 +77,7 @@ export class ExitIPv4 extends EventEmitter<{
     if (this.pending) return this.pending;
     this.steps = [];
     this.pending = readServiceExit(
-      (timeoutMs) => this.read(timeoutMs),
+      (timeoutMs, attempt) => this.read(timeoutMs, attempt),
       () => !this.abort.signal.aborted,
     )
       .then((result) => {
@@ -93,7 +93,7 @@ export class ExitIPv4 extends EventEmitter<{
   stop() {
     this.abort.abort();
   }
-  private async read(timeoutMs: number): Promise<ExitResult> {
+  private async read(timeoutMs: number, attempt: number): Promise<ExitResult> {
     const { endpoint, name } = services[this.service];
     const hostname = new URL(endpoint).hostname;
     const started = performance.now();
@@ -106,6 +106,16 @@ export class ExitIPv4 extends EventEmitter<{
         cache: false,
       }));
       await bounded(transport.closeAllConnections(), signal);
+      if (attempt) {
+        this.progress({
+          step: "reconnect",
+          label: "代理 / 网络",
+          status: "running",
+          detail: `正在恢复连接（${attempt}）`,
+        });
+        await bounded(transport.clearHostResolverCache(), signal);
+        await bounded(transport.forceReloadProxyConfig(), signal);
+      }
       const proxy = await bounded(transport.resolveProxy(endpoint), signal);
       adapter = proxy === "DIRECT" ? "系统直连" : "系统代理";
       if (proxy !== "DIRECT")

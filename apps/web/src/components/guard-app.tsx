@@ -57,8 +57,8 @@ import {
 import { BrowserExtensionPanel } from "#src/components/browser-extension-panel.tsx";
 import { CoffeePage } from "#src/components/coffee-page.tsx";
 import { EditAppDialog } from "#src/components/edit-app-dialog.tsx";
-import { MacFilterPanel } from "#src/components/mac-filter-panel.tsx";
 import { ServiceProcessControl } from "#src/components/service-process-control.tsx";
+import { SystemProtectionPanel } from "#src/components/system-protection-panel.tsx";
 import { UpdatePanel } from "#src/components/update-panel.tsx";
 
 import "#src/guard.css";
@@ -934,7 +934,9 @@ export function GuardApp() {
             <span>
               {bridge
                 ? managed
-                  ? "受控启动测试版"
+                  ? snapshot.systemProtection?.active
+                    ? "系统防护测试版"
+                    : "受控启动测试版"
                   : snapshot.admin
                     ? "管理员模式"
                     : "普通权限"
@@ -1029,14 +1031,11 @@ export function GuardApp() {
               <Shield size={18} />
               <span>
                 {snapshot.platform === "darwin" ? "macOS" : "Ubuntu"}{" "}
-                测试版：网页由插件独立阻断。应用仅保护通过 IP Guard
-                或受控启动器启动的实例；原快捷方式不被启动拦截。
-                {snapshot.platform === "darwin"
-                  ? "系统网络过滤需完成签名，并在防护设置中单独启用。"
-                  : "当前 Ubuntu 测试版未提供系统级网络过滤。"}
-                {snapshot.processProtection === "managed-cgroup"
-                  ? "进程由 systemd 控制组管理。"
-                  : "进程按受控进程组管理，另建会话的子进程可能脱离此范围。"}
+                {snapshot.systemProtection?.active
+                  ? snapshot.systemProtection.phase === "enabled"
+                    ? "系统防护已确认：系统组件登记的原入口应用也按独立规则保护。网页由插件独立阻断；Mac 解释器脚本继续使用受控启动器。"
+                    : "系统策略尚未确认，已登记应用保持阻断。请在防护设置中恢复连接或关闭系统防护。"
+                  : "当前使用受控启动和网页防护。原入口应用的系统防护需在防护设置中启用；Mac 还需最后完成本机签名和系统授权。"}
               </span>
               <button
                 className="text-btn"
@@ -1341,7 +1340,11 @@ export function GuardApp() {
                   available={available}
                   onSetup={async () => Boolean(await invoke({ action: "extension:setup" }))}
                 />
-                {snapshot.platform === "darwin" && <MacFilterPanel />}
+                {managed && (
+                  <SystemProtectionPanel
+                    platform={snapshot.platform === "linux" ? "linux" : "darwin"}
+                  />
+                )}
                 <UpdatePanel />
                 <section className="panel settings-panel">
                   <div className="panel-heading">

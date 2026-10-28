@@ -24,10 +24,11 @@ type Policy struct {
 	Targets []Target `json:"targets"`
 }
 type Request struct {
-	Action  string  `json:"action"`
-	Policy  *Policy `json:"policy,omitempty"`
-	Service string  `json:"service,omitempty"`
-	ID      string  `json:"id,omitempty"`
+	Action   string  `json:"action"`
+	Policy   *Policy `json:"policy,omitempty"`
+	Service  string  `json:"service,omitempty"`
+	ID       string  `json:"id,omitempty"`
+	Sequence uint64  `json:"sequence,omitempty"`
 }
 
 var uuid = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -52,7 +53,7 @@ func decodeRequest(data []byte, uid uint32) (Request, error) {
 			return r, errors.New("unexpected command fields")
 		}
 	case "stop":
-		if r.Policy != nil || (r.ID != "" && !uuid.MatchString(r.ID)) || (r.ID == "" && r.Service != "claude" && r.Service != "chatgpt") {
+		if r.Policy != nil || (r.ID != "" && (r.Service != "" || !uuid.MatchString(r.ID))) || (r.ID == "" && r.Service != "claude" && r.Service != "chatgpt") {
 			return r, errors.New("invalid stop scope")
 		}
 	case "policy":

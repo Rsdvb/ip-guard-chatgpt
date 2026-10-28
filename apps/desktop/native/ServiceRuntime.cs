@@ -5,6 +5,7 @@ using System.Linq;
 namespace IpGuard {
     public sealed class ServiceRuntime {
         public readonly object gate=new object();
+        public readonly System.Threading.AutoResetEvent wake=new System.Threading.AutoResetEvent(false);
         public readonly List<Session> sessions=new List<Session>();
         public bool healthy,pendingBlock,checking,unverified;
         public string currentIp="",reason="请先锁定该服务允许的公网 IPv4",checkedAt="",adapter="";

@@ -26,6 +26,11 @@ if (process.platform !== "win32") {
       stdio: "inherit",
     });
     if (swift.status !== 0) throw swift.error || new Error("macOS filter build failed");
+  } else {
+    const linux = spawnSync(process.execPath, [path.join(root, "scripts/build-linux.ts")], {
+      stdio: "inherit",
+    });
+    if (linux.status !== 0) throw linux.error || new Error("Ubuntu native build failed");
   }
   process.exit(0);
 }

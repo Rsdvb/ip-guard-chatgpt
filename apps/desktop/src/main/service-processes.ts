@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { z } from "zod";
+
 import { serviceName } from "@ip-guard/electron";
 import type { ProcessState, Service } from "@ip-guard/electron";
 
@@ -12,57 +14,48 @@ import {
 } from "#src/main/service-process-policy.ts";
 import type { WindowsProcessSnapshot } from "#src/main/service-process-policy.ts";
 
+import { nativePath } from "./guardian.ts";
+
 const run = promisify(execFile);
 const windows = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32");
-const query = (service: Service) => `
-$ErrorActionPreference='Stop'
-[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
-$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$username=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$session=[System.Diagnostics.Process]::GetCurrentProcess().SessionId
-$all=@(Get-CimInstance Win32_Process -Filter ("SessionId="+$session) -Property Handle,ProcessId,ParentProcessId,Name -ErrorAction Stop)
-$image='${processImage(service)}'
-$otherImage='${processImage(service === "claude" ? "chatgpt" : "claude")}'
-$items=@(); $unknown=0; $parents=@{}
-foreach($p in $all) {
-  $parents[[int]$p.ProcessId]=[int]$p.ParentProcessId
-  if($p.Name -ne $image) { continue }
-  try {
-    $owner=Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop
-    if($owner.ReturnValue -eq 0 -and $owner.Sid -eq $sid) { $items+=@{pid=[int]$p.ProcessId;parent=[int]$p.ParentProcessId} }
-    elseif($owner.ReturnValue -ne 0) { $unknown++ }
-  } catch { $unknown++ }
-}
-$targets=[System.Collections.Generic.HashSet[int]]::new()
-foreach($p in $items) { [void]$targets.Add($p.pid) }
-$mixedServices=$false
-foreach($p in $all) {
-  if($p.Name -ne $otherImage) { continue }
-  $visited=[System.Collections.Generic.HashSet[int]]::new(); $cursor=[int]$p.ProcessId
-  while($cursor -gt 0 -and $visited.Add($cursor)) {
-    if($targets.Contains($cursor)) { $mixedServices=$true; break }
-    if(-not $parents.ContainsKey($cursor)) { break }
-    $cursor=$parents[$cursor]
-  }
-}
-$ancestors=[System.Collections.Generic.HashSet[int]]::new()
-$cursor=${process.pid}
-while($cursor -gt 0 -and $ancestors.Add($cursor)) {
-  if(-not $parents.ContainsKey($cursor)) { break }
-  $cursor=$parents[$cursor]
-}
-$selfInTree=$false
-foreach($p in $items) { if($ancestors.Contains($p.pid)) { $selfInTree=$true } }
-@{session=$session;username=$username;unknown=$unknown;selfInTree=$selfInTree;mixedServices=$mixedServices;processes=@($items)} | ConvertTo-Json -Depth 4 -Compress
-`;
-async function snapshot(service: Service): Promise<WindowsProcessSnapshot> {
-  const result = await run(
-    path.join(windows, "WindowsPowerShell/v1.0/powershell.exe"),
-    ["-NoProfile", "-NonInteractive", "-Command", query(service)],
-    { windowsHide: true, timeout: 12000, maxBuffer: 131072, encoding: "utf8" },
-  );
+const inventorySchema = z.object({
+  claude: windowsProcessSnapshotSchema,
+  chatgpt: windowsProcessSnapshotSchema,
+});
+let inventory: z.infer<typeof inventorySchema> | undefined;
+let readAt = 0;
+let reading: Promise<z.infer<typeof inventorySchema>> | undefined;
+async function readInventory() {
+  const result = await run(nativePath(), ["process-inventory", String(process.pid)], {
+    windowsHide: true,
+    timeout: 5000,
+    maxBuffer: 131072,
+    encoding: "utf8",
+  });
   const value: unknown = JSON.parse(result.stdout.trim().replace(/^\uFEFF/, ""));
-  return windowsProcessSnapshotSchema.parse(value);
+  inventory = inventorySchema.parse(value);
+  readAt = performance.now();
+  return inventory;
+}
+async function snapshot(service: Service, force = false): Promise<WindowsProcessSnapshot> {
+  if (force) return (await readInventory())[service];
+  if (inventory && performance.now() - readAt < 1500) return inventory[service];
+  reading ??= readInventory().finally(() => {
+    reading = undefined;
+  });
+  return (await reading)[service];
+}
+export function cachedServiceProcessStatus(service: Service): ProcessState {
+  return inventory
+    ? evaluateProcesses(service, inventory[service])
+    : {
+        service,
+        phase: "unknown",
+        count: 0,
+        canStop: false,
+        message: "打开窗口后刷新进程状态",
+        checkedAt: "",
+      };
 }
 const pending = new Map<Service, Promise<ProcessState>>();
 export function serviceProcessStatus(service: Service): Promise<ProcessState> {
@@ -85,7 +78,7 @@ export function serviceProcessStatus(service: Service): Promise<ProcessState> {
   return request;
 }
 export async function stopServiceTrees(service: Service): Promise<ProcessState> {
-  const before = await snapshot(service);
+  const before = await snapshot(service, true);
   const current = evaluateProcesses(service, before);
   if (current.phase === "stopped") return current;
   if (!current.canStop) throw new Error(current.message || "无法确认可停止的服务进程");
@@ -111,7 +104,7 @@ export async function stopServiceTrees(service: Service): Promise<ProcessState> 
       ),
     ),
   );
-  const after = evaluateProcesses(service, await snapshot(service));
+  const after = evaluateProcesses(service, await snapshot(service, true));
   if (after.phase === "running")
     throw new Error(`部分 ${serviceName(service)} 进程仍在运行，请检查权限后重试`);
   if (after.phase === "unknown") throw new Error("停止请求已发送，进程状态暂未确认");

@@ -3,13 +3,16 @@ import NetworkExtension
 import SystemExtensions
 
 private let extensionID = "com.ip-guard.desktop.filter"
-private func emit(_ phase: String, _ message: String) {
-    let value = ["phase": phase, "message": message]
+private var cleanup: (() -> Void)?
+private func emit(_ phase: String, _ message: String, sequence: UInt64? = nil, running: [RunningProcess]? = nil) {
+    var value: [String: Any] = ["phase": phase, "message": message]
+    if let sequence = sequence { value["sequence"] = sequence }
+    if let running = running, let data = try? JSONEncoder().encode(running), let records = try? JSONSerialization.jsonObject(with: data) { value["running"] = records }
     if let data = try? JSONSerialization.data(withJSONObject: value) {
         FileHandle.standardOutput.write(data); FileHandle.standardOutput.write(Data([10]))
     }
 }
-private func fail(_ message: String) -> Never { emit("error", message); exit(1) }
+private func fail(_ message: String) -> Never { let revoke = cleanup; cleanup = nil; revoke?(); emit("error", message); exit(1) }
 
 final class FilterControl: NSObject, OSSystemExtensionRequestDelegate {
     let manager = NEFilterManager.shared()
@@ -17,6 +20,7 @@ final class FilterControl: NSObject, OSSystemExtensionRequestDelegate {
     var policy: FilterPolicy?
     var connection: NSXPCConnection?
     private var previousTargets: [FilterTarget]?
+    private lazy var monitor = ProcessMonitor()
     init(team: String) { self.team = team }
 
     private func load(_ body: @escaping () -> Void) {
@@ -35,7 +39,11 @@ final class FilterControl: NSObject, OSSystemExtensionRequestDelegate {
         }
     }
     func enable(policy: FilterPolicy) {
-        self.policy = policy
+        do {
+            let resolved = try monitor.resolved(policy)
+            guard !monitor.hasRunning(resolved) else { fail("请先退出已登记应用，再启用系统防护；已有连接需要重新建立") }
+            self.policy = resolved
+        } catch { fail("无法确认受保护程序路径：\(error)") }
         let request = OSSystemExtensionRequest.activationRequest(forExtensionWithIdentifier: extensionID, queue: .main)
         request.delegate = self; OSSystemExtensionManager.shared.submitRequest(request)
     }
@@ -91,17 +99,35 @@ final class FilterControl: NSObject, OSSystemExtensionRequestDelegate {
         guard let proxy = channel.remoteObjectProxyWithErrorHandler({ error in fail(error.localizedDescription) }) as? IPGuardPolicyChannel else { fail("无法建立系统过滤策略通道") }
         callback(proxy)
     }
+    func stop(policy: FilterPolicy) {
+        do {
+            let resolved = try monitor.resolved(policy)
+            _ = try monitor.enforce(resolved, force: true)
+            guard !monitor.hasRunning(resolved) else { fail("仍有受保护程序未结束，请稍后重试") }
+            emit("enabled", "已结束所选服务的已登记程序"); exit(0)
+        } catch { fail("停止所选程序失败：\(error)") }
+    }
     func stream() {
-        connect { proxy in
+        load {
+          if let data = self.manager.providerConfiguration?.vendorConfiguration?["IPGuardBindings"] as? Data,
+             let bindings = try? JSONDecoder().decode([String: [FilterTarget]].self, from: data) {
+              self.monitor.seed(bindings[String(getuid())] ?? [])
+          }
+          self.connect { proxy in
+            cleanup = { self.monitor.revokeAll() }
             DispatchQueue.global().async {
+                var sequence: UInt64 = 0
                 while let line = readLine() {
-                    guard let data = line.data(using: .utf8) else { fail("策略格式错误") }
+                    guard line.utf8.count <= 524288, let data = line.data(using: .utf8) else { fail("策略格式错误") }
                     do {
-                        let policy = try FilterPolicy.decode(data, uid: getuid())
+                        let policy = try self.monitor.resolved(FilterPolicy.decode(data, uid: getuid()))
+                        guard let revision = policy.sequence, revision > sequence else { fail("策略版本无效或重复") }
+                        sequence = revision
                         let wait = DispatchSemaphore(value: 0)
                         var accepted = false
-                        proxy.update(data) { ok in accepted = ok; wait.signal() }
+                        proxy.update(try JSONEncoder().encode(policy)) { ok in accepted = ok; wait.signal() }
                         guard wait.wait(timeout: .now() + 3) == .success, accepted else { fail("系统过滤器拒绝或未确认本次策略") }
+                        let running = try self.monitor.enforce(policy)
                         let binding = policy.targets.map(\.binding)
                         if binding != self.previousTargets {
                             let saved = DispatchSemaphore(value: 0)
@@ -121,11 +147,13 @@ final class FilterControl: NSObject, OSSystemExtensionRequestDelegate {
                             guard saved.wait(timeout: .now() + 5) == .success else { fail("持久化系统过滤规则超时") }
                             self.previousTargets = binding
                         }
-                        emit("enabled", "系统过滤器已确认当前用户的独立 IP 策略")
+                        emit("enabled", "系统过滤器已确认当前用户的独立 IP 策略", sequence: revision, running: running)
                     } catch { fail(error.localizedDescription) }
                 }
+                self.monitor.revokeAll(); cleanup = nil; self.connection?.invalidationHandler = nil
                 self.connection?.invalidate(); exit(0)
             }
+          }
         }
     }
 }
@@ -144,9 +172,12 @@ final class FilterControl: NSObject, OSSystemExtensionRequestDelegate {
         if operation == "status" { control.status() }
         else if operation == "disable" { control.disable() }
         else if operation == "stream" { control.stream() }
-        else if operation == "enable" {
-            guard let line = readLine(), let data = line.data(using: .utf8) else { fail("缺少初始过滤规则") }
-            do { control.enable(policy: try FilterPolicy.decode(data, uid: getuid())) }
+        else if operation == "enable" || operation == "stop" {
+            guard let line = readLine(), line.utf8.count <= 524288, let data = line.data(using: .utf8) else { fail("缺少初始过滤规则") }
+            do {
+                let policy = try FilterPolicy.decode(data, uid: getuid())
+                if operation == "stop" { control.stop(policy: policy) } else { control.enable(policy: policy) }
+            }
             catch { fail(error.localizedDescription) }
         } else { fail("未知过滤操作") }
         DispatchQueue.main.asyncAfter(deadline: .now() + (operation == "enable" ? 120 : 15)) {

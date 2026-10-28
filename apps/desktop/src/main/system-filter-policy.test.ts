@@ -2,7 +2,7 @@ import { expect, it } from "vite-plus/test";
 
 import { nativeVersion, snapshotSchema } from "@ip-guard/electron";
 
-import { macFilterPolicy } from "./mac-filter-policy.ts";
+import { systemFilterPolicy } from "./system-filter-policy.ts";
 
 it("independently authorizes fresh target services and retains deny bindings on guard loss", () => {
   const now = Date.now();
@@ -52,11 +52,11 @@ it("independently authorizes fresh target services and retains deny bindings on 
       },
     ],
   });
-  const policy = macFilterPolicy(snapshot, 501, now, []);
+  const policy = systemFilterPolicy(snapshot, 501, now, [], "darwin");
   expect(policy.targets.map((target) => target.allowed)).toEqual([true, false]);
   expect(policy.targets[0]?.bundleRoot).toBe("/Applications/Claude.app");
   expect(
-    macFilterPolicy(
+    systemFilterPolicy(
       {
         ...snapshot,
         apps: snapshot.apps.map((app) => ({ ...app, path: `/usr/local/bin/${app.service}` })),
@@ -64,15 +64,18 @@ it("independently authorizes fresh target services and retains deny bindings on 
       501,
       now,
       [],
+      "darwin",
     ).targets,
   ).toEqual([]);
   expect(
-    macFilterPolicy(snapshot, 501, now + 11000, []).targets.every((target) => !target.allowed),
+    systemFilterPolicy(snapshot, 501, now + 11000, [], "darwin").targets.every(
+      (target) => !target.allowed,
+    ),
   ).toBe(true);
-  expect(macFilterPolicy(undefined, 501, now, policy.targets).targets).toEqual(
-    policy.targets.map((target) => ({ ...target, allowed: false })),
+  expect(systemFilterPolicy(undefined, 501, now, policy.targets, "darwin").targets).toEqual(
+    policy.targets.map((target) => ({ ...target, allowed: false, keepRunning: false })),
   );
   expect(
-    macFilterPolicy({ ...snapshot, online: false }, 501, now, policy.targets).targets,
+    systemFilterPolicy({ ...snapshot, online: false }, 501, now, policy.targets, "darwin").targets,
   ).toHaveLength(2);
 });

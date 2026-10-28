@@ -28,7 +28,7 @@ for (const entry of [
   },
   {
     module: "IPGuardMacControl",
-    files: ["Policy.swift", "PolicyIPC.swift", "FilterControl.swift"],
+    files: ["Policy.swift", "PolicyIPC.swift", "ProcessMonitor.swift", "FilterControl.swift"],
     binary: path.join(output, "IpGuardMacControl"),
   },
   {
@@ -54,6 +54,8 @@ for (const entry of [
       "SystemExtensions",
       "-framework",
       "Security",
+      "-framework",
+      "AppKit",
       ...entry.files.map((file) => path.join(source, file)),
       "-o",
       entry.binary,

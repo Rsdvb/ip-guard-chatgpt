@@ -28,9 +28,12 @@ type Running struct {
 	PID     int    `json:"pid"`
 }
 type Response struct {
-	Phase   string    `json:"phase"`
-	Message string    `json:"message"`
-	Running []Running `json:"running"`
+	Phase    string    `json:"phase"`
+	Message  string    `json:"message"`
+	Running  []Running `json:"running"`
+	Active   bool      `json:"active"`
+	Version  string    `json:"version"`
+	Sequence uint64    `json:"sequence"`
 }
 type engine struct {
 	mu         sync.Mutex
@@ -308,7 +311,7 @@ func (e *engine) expire() {
 	}
 }
 func (e *engine) response() Response {
-	r := Response{Phase: "disabled", Message: "系统防护未启用", Running: []Running{}}
+	r := Response{Phase: "disabled", Message: "系统防护未启用", Running: []Running{}, Active: e.enabled, Version: buildVersion}
 	if e.enabled {
 		r.Phase = "enabled"
 		r.Message = "系统启动拦截和内核网络过滤已就绪"
@@ -339,12 +342,19 @@ func (e *engine) request(r Request) (Response, error) {
 		if err := saveState(e.file, diskState{Enabled: false, Policy: binding(e.policy)}); err != nil {
 			return e.response(), err
 		}
+		for _, g := range e.groups {
+			if err := g.kill(); err != nil {
+				return e.response(), err
+			}
+		}
 		e.detach()
 	case "stop":
 		for _, t := range e.policy.Targets {
 			if t.ID == r.ID || r.ID == "" && t.Service == r.Service {
-				if err := e.groups[t.ID].kill(); err != nil {
-					return e.response(), err
+				if g := e.groups[t.ID]; g != nil {
+					if err := g.kill(); err != nil {
+						return e.response(), err
+					}
 				}
 			}
 		}

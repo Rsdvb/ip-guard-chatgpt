@@ -55,6 +55,11 @@ linux:
   extraResources:
     - from: posix
       to: posix
+    - from: dist/linux
+      to: linux-native
+      filter: [ipguard-system]
+    - from: linux
+      to: linux-source
   category: Utility
   target:
     - target: deb
@@ -63,3 +68,18 @@ linux:
       arch: [x64]
   artifactName: IP-Guard-${version}-Ubuntu-${arch}.${ext}
   maintainer: Rsdvb <64085433+Rsdvb@users.noreply.github.com>
+deb:
+  afterInstall: dist/linux/after-install.tpl
+  afterRemove: dist/linux/after-remove.tpl
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - policykit-1
+    - systemd

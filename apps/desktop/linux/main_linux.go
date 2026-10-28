@@ -20,6 +20,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var buildVersion = "development"
+
 func policyFile(uid uint32) string { return fmt.Sprintf("/var/lib/ipguard/%d.json", uid) }
 func socketPath(uid uint32) string { return fmt.Sprintf("/run/ipguard/%d.sock", uid) }
 func rootDirectory(directory string, mode os.FileMode) error {
@@ -77,6 +79,7 @@ func serve(e *engine, listener *net.UnixListener) error {
 			scanner.Buffer(make([]byte, 4096), 524288)
 			encoder := json.NewEncoder(connection)
 			owned := false
+			var sequence uint64
 			defer func() {
 				if owned {
 					e.mu.Lock()
@@ -97,6 +100,11 @@ func serve(e *engine, listener *net.UnixListener) error {
 					return
 				}
 				if request.Action == "policy" {
+					if request.Sequence == 0 || request.Sequence <= sequence {
+						_ = encoder.Encode(Response{Phase: "error", Message: "策略版本无效或重复", Running: []Running{}})
+						return
+					}
+					sequence = request.Sequence
 					e.mu.Lock()
 					if !owned && e.controller {
 						e.mu.Unlock()
@@ -110,6 +118,7 @@ func serve(e *engine, listener *net.UnixListener) error {
 					e.mu.Unlock()
 				}
 				response, err := e.request(request)
+				response.Sequence = request.Sequence
 				if err != nil {
 					response.Phase = "error"
 					response.Message = err.Error()
@@ -221,7 +230,7 @@ func enable(uid uint32) error {
 	if err != nil {
 		return fmt.Errorf("system service: %s: %w", result, err)
 	}
-	return json.NewEncoder(os.Stdout).Encode(Response{Phase: "enabled", Message: "系统组件已启动，等待策略确认", Running: []Running{}})
+	return json.NewEncoder(os.Stdout).Encode(Response{Phase: "enabled", Message: "系统组件已启动，等待策略确认", Running: []Running{}, Active: true, Version: buildVersion})
 }
 func main() {
 	if os.Geteuid() != 0 {

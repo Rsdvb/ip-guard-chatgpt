@@ -15,6 +15,7 @@ import { ProtectionAlerts } from "#src/main/protection-alerts.ts";
 import { ProtectionProbe } from "#src/main/protection-probe.ts";
 import { parseHttpOrigin, parseLoopbackOrigin } from "#src/main/renderer-route.ts";
 import { serveRenderer } from "#src/main/renderer.ts";
+import { SystemProtection } from "#src/main/system-protection.ts";
 import { ApplicationUpdates } from "#src/main/updates.ts";
 import { createMainWindow } from "#src/main/window.ts";
 
@@ -53,13 +54,13 @@ const claude = new ExitIPv4("claude");
 const chatgpt = new ExitIPv4("chatgpt");
 const probe = new ProtectionProbe({ claude, chatgpt });
 const guardian = new Guardian(probe);
-const browserBridge = new BrowserBridge(guardian);
+const systemProtection = new SystemProtection(guardian);
 const coffee = {
   claude: new CoffeeDiagnostics("claude", claude),
   chatgpt: new CoffeeDiagnostics("chatgpt", chatgpt),
 };
 const protectionAlerts = new ProtectionAlerts(guardian, () => {
-  const [win] = BrowserWindow.getAllWindows();
+  const win = BrowserWindow.getAllWindows()[0] ?? open();
   if (win) {
     win.show();
     if (win.isMinimized()) win.restore();
@@ -77,23 +78,38 @@ const updates = new ApplicationUpdates(
     quittingForUpdate = false;
   },
 );
+const browserBridge = new BrowserBridge(guardian, updates);
 let tray: Tray | undefined;
 const background =
   process.argv.includes("--background") ||
   (process.platform === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin);
 
-const open = () =>
-  createMainWindow({
+const open = () => {
+  const win = createMainWindow({
     devOrigin,
     preload: path.join(import.meta.dirname, "../preload/index.cjs"),
     url: devOrigin ?? `${rendererOrigin}/`,
-    background,
+    background: false,
   });
+  win.on("close", (event) => {
+    if (!quitting && !quittingForUpdate) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
+  return win;
+};
+const show = () => {
+  void updates.check();
+  const win = BrowserWindow.getAllWindows()[0] ?? open();
+  win.show();
+  if (win.isMinimized()) win.restore();
+  win.focus();
+};
 
 const start = () => {
-  setupIpc(devOrigin, guardian, coffee, probe, updates, browserBridge);
+  setupIpc(devOrigin, guardian, coffee, probe, updates, browserBridge, systemProtection);
   guardian.start();
-  for (const diagnostics of Object.values(coffee)) diagnostics.start();
   updates.start();
 
   if (devOrigin === null) {
@@ -103,19 +119,7 @@ const start = () => {
     });
   }
 
-  const win = open();
-  win.on("close", (event) => {
-    if (!quitting && !quittingForUpdate) {
-      event.preventDefault();
-      win.hide();
-    }
-  });
-  const show = () => {
-    void updates.check();
-    win.show();
-    if (win.isMinimized()) win.restore();
-    win.focus();
-  };
+  if (!background) open();
   tray = new Tray(
     nativeImage.createFromPath(
       path.join(
@@ -164,18 +168,8 @@ const start = () => {
 
 if (app.requestSingleInstanceLock()) {
   app.on("ready", start);
-  app.on("activate", () => {
-    void updates.check();
-    if (BrowserWindow.getAllWindows().length === 0) {
-      open();
-    }
-  });
-  app.on("second-instance", () => {
-    void updates.check();
-    const [win] = BrowserWindow.getAllWindows();
-    win?.show();
-    win?.focus();
-  });
+  app.on("activate", show);
+  app.on("second-instance", show);
   app.on("window-all-closed", () => {
     if (quitting) app.quit();
   });
@@ -187,13 +181,17 @@ if (app.requestSingleInstanceLock()) {
     protectionAlerts.stop();
     browserBridge.close();
     for (const diagnostics of Object.values(coffee)) diagnostics.stop();
-    void guardian.stop().finally(() => {
-      claude.stop();
-      chatgpt.stop();
-      quittingNative = true;
-      tray?.destroy();
-      app.quit();
-    });
+    void systemProtection
+      .stop()
+      .catch((error) => console.error("停止系统防护进程", error))
+      .then(() => guardian.stop())
+      .finally(() => {
+        claude.stop();
+        chatgpt.stop();
+        quittingNative = true;
+        tray?.destroy();
+        app.quit();
+      });
   });
 } else {
   app.quit();
