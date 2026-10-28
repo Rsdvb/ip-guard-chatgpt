@@ -8,7 +8,7 @@ namespace IpGuard {
         [MTAThread] public static int Main(string[] args) {
             if(args.Length>0 && args[0].StartsWith("chrome-extension://",StringComparison.Ordinal)) return BrowserHost.Run(args[0]);
             try {
-                if(args.Length>0 && (args[0]=="guard" || args[0]=="version" || args[0]=="notice" || args[0]=="process-inventory" || args[0]=="admin-status" || args[0]=="elevate-desktop")) {
+                if(args.Length>0 && (args[0]=="guard" || args[0]=="version" || args[0]=="notice" || args[0]=="process-inventory" || args[0]=="admin-status" || args[0]=="elevate-desktop" || args[0]=="recover")) {
                     Console.SetIn(new StreamReader(Console.OpenStandardInput(),new UTF8Encoding(false)));
                     Console.SetOut(new StreamWriter(Console.OpenStandardOutput(),new UTF8Encoding(false)) { AutoFlush=true });
                     Console.SetError(new StreamWriter(Console.OpenStandardError(),new UTF8Encoding(false)) { AutoFlush=true });
@@ -54,7 +54,7 @@ namespace IpGuard {
                 if(args.Length>0 && args[0]=="elevate-desktop" && e.GetBaseException() is System.ComponentModel.Win32Exception && ((System.ComponentModel.Win32Exception)e.GetBaseException()).NativeErrorCode==1223) return 1223;
                 string error=e.GetBaseException().Message;
                 if(args.Length>0 && args[0]=="guard") { Console.WriteLine(Data.Json().Serialize(new { type="fatal",error=error })); Console.Out.Flush(); }
-                else if(args.Length>0 && (args[0]=="process-inventory" || args[0]=="admin-status" || args[0]=="elevate-desktop")) Console.Error.WriteLine(error);
+                else if(args.Length>0 && (args[0]=="process-inventory" || args[0]=="admin-status" || args[0]=="elevate-desktop" || args[0]=="recover")) Console.Error.WriteLine(error);
                 else Win32.MessageBox(IntPtr.Zero,error,"IP Guard",0x10);
                 return 1;
             }

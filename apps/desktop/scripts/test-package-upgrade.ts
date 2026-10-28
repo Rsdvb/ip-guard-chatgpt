@@ -9,6 +9,7 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  realpathSync,
   rmSync,
 } from "node:fs";
 import os from "node:os";
@@ -29,7 +30,7 @@ assert.ok(
 );
 const data = path.join(localData, "IPGuard");
 assert.ok(!existsSync(data), "An isolated runner must have no existing IP Guard data to replace");
-const directory = mkdtempSync(path.join(os.tmpdir(), "ipguard-upgrade-"));
+const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), "ipguard-upgrade-")));
 copyFileSync(path.join(root, "dist/NativePolicyTests.exe"), path.join(directory, "fixture.exe"));
 copyFileSync(path.join(root, "assets/tray.png"), path.join(directory, "logo.png"));
 const valid = path.join(directory, `ipguard-fixture-${randomUUID()}.exe`);
@@ -171,8 +172,14 @@ async function guardian(expected: string) {
   } finally {
     clearTimeout(helloTimer);
     if (child.exitCode === null) {
-      child.kill();
-      await once(child, "exit");
+      try {
+        await request("shutdown");
+      } finally {
+        if (child.exitCode === null) {
+          child.kill();
+          await once(child, "exit");
+        }
+      }
     }
     for (const pending of requests.values()) clearTimeout(pending.timer);
   }
