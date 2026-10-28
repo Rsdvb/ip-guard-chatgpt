@@ -52,6 +52,18 @@ application.process().stdout?.on("data", (data) => process.stdout.write(data));
 application.process().stderr?.on("data", (data) => process.stderr.write(data));
 let nativeHost: ReturnType<typeof spawn> | undefined;
 try {
+  console.log(
+    "Packaged startup",
+    await application.evaluate(({ app, BrowserWindow }) => ({
+      ready: app.isReady(),
+      argv: process.argv,
+      windows: BrowserWindow.getAllWindows().map((window) => ({
+        url: window.webContents.getURL(),
+        visible: window.isVisible(),
+        loading: window.webContents.isLoading(),
+      })),
+    })),
+  );
   const page = await application.firstWindow();
   await page.waitForLoadState("networkidle");
   const deadline = performance.now() + 15000;
