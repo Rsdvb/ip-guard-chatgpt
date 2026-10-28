@@ -93,7 +93,7 @@ export function UpdatePanel() {
               onClick={() => void invoke({ action: "update:download" })}
             >
               <ArrowDownToLine size={14} />
-              下载更新
+              {state.canInstall === false ? "前往下载" : "下载更新"}
             </button>
           )}
           {state.phase === "downloaded" && (
@@ -125,6 +125,9 @@ export function UpdatePanel() {
           <time>{new Date(state.checkedAt).toLocaleTimeString("zh-CN", { hour12: false })}</time>
         )}
       </div>
+      <p className="field-help">
+        启动后及每 6 小时检查预览版更新。下载完成后由你确认安装，保留两项服务的 IP 设置。
+      </p>
     </section>
   );
 }

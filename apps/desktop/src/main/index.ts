@@ -77,15 +77,49 @@ async function runDesktop() {
   let quittingNative = false;
   let quittingForUpdate = false;
   const updates = new ApplicationUpdates(
-    () => {
+    async () => {
       quittingForUpdate = true;
+      browserBridge.close();
+      await guardian.stop();
     },
     () => {
       quittingForUpdate = false;
+      guardian.start();
     },
   );
   const browserBridge = new BrowserBridge(guardian, updates);
   let tray: Tray | undefined;
+  let exitPending = false;
+  const quitAndRelease = async () => {
+    if (exitPending) return false;
+    exitPending = true;
+    try {
+      const answer = await dialog.showMessageBox({
+        type: "warning",
+        title: "完全退出并解除防护",
+        message: "完全退出 IP Guard 并解除 Claude / ChatGPT 防护？",
+        detail:
+          "请先保存会话。将结束当前受保护的程序，解除启动拦截、网络阻断和浏览器限制。退出后可从原快捷方式正常打开应用。两项服务的 IP 设置会保留，重新打开 IP Guard 后恢复防护。",
+        buttons: ["取消", "完全退出并解除防护"],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (answer.response !== 1) return false;
+      if (systemProtection.active) await systemProtection.setEnabled(false);
+      await guardian.request("release-protection");
+      await browserBridge.release();
+      app.quit();
+      return true;
+    } catch (error) {
+      dialog.showErrorBox(
+        "解除防护未完成，尚未退出",
+        error instanceof Error ? error.message : "请重试退出，或运行安装目录的恢复工具",
+      );
+      return false;
+    } finally {
+      exitPending = false;
+    }
+  };
   const background =
     process.argv.includes("--background") ||
     (process.platform === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin);
@@ -106,7 +140,7 @@ async function runDesktop() {
     return win;
   };
   const show = () => {
-    void updates.check();
+    void updates.check(false);
     const win = BrowserWindow.getAllWindows()[0] ?? open();
     win.show();
     if (win.isMinimized()) win.restore();
@@ -114,7 +148,16 @@ async function runDesktop() {
   };
 
   const start = () => {
-    setupIpc(devOrigin, guardian, coffee, probe, updates, browserBridge, systemProtection);
+    setupIpc(
+      devOrigin,
+      guardian,
+      coffee,
+      probe,
+      updates,
+      browserBridge,
+      systemProtection,
+      quitAndRelease,
+    );
     guardian.start();
     updates.start();
 
@@ -140,24 +183,9 @@ async function runDesktop() {
         { label: "打开 IP Guard", click: show },
         { type: "separator" },
         {
-          label: "退出并结束受保护程序",
-          click: async () => {
-            if ((guardian.snapshot?.running.length ?? 0) > 0) {
-              const choice = await dialog.showMessageBox({
-                type: "warning",
-                message:
-                  process.platform === "win32"
-                    ? "退出将结束所有受保护程序，启动拦截会继续保留。"
-                    : systemProtection.active
-                      ? "退出将结束系统组件登记和受控启动的程序；系统过滤和网页保持阻断，直到重新校验或关闭系统防护。"
-                      : "退出将结束受控启动的程序，网页保持阻断；原快捷方式启动的程序不在防护范围。",
-                buttons: ["取消", "退出"],
-                defaultId: 0,
-                cancelId: 0,
-              });
-              if (choice.response !== 1) return;
-            }
-            app.quit();
+          label: "完全退出并解除防护",
+          click: () => {
+            void quitAndRelease();
           },
         },
       ]),
@@ -185,6 +213,7 @@ async function runDesktop() {
       event.preventDefault();
       if (quitting) return;
       quitting = true;
+      updates.stop();
       protectionAlerts.stop();
       browserBridge.close();
       for (const diagnostics of Object.values(coffee)) diagnostics.stop();

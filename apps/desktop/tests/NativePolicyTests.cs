@@ -3,11 +3,60 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
 namespace IpGuard {
     public static class NativePolicyTests {
+        [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
+        [DllImport("advapi32.dll",SetLastError=true)] static extern bool CreateRestrictedToken(IntPtr original,uint flags,uint disable,IntPtr groups,uint delete,IntPtr privileges,uint restrict,IntPtr sids,out IntPtr token);
+        [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertStringSidToSid(string value,out IntPtr sid);
+        [DllImport("advapi32.dll",SetLastError=true)] static extern bool SetTokenInformation(IntPtr token,int kind,ref TokenLabel label,int length);
+        [DllImport("advapi32.dll")] static extern int GetLengthSid(IntPtr sid);
+        [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr value);
+        [StructLayout(LayoutKind.Sequential)] struct TokenLabel { public IntPtr sid; public uint attributes; }
+        static int MediumHost(string origin) {
+            IntPtr original=IntPtr.Zero,restricted=IntPtr.Zero,sid=IntPtr.Zero;
+            try {
+                Win32.Check(OpenProcessToken(Win32.GetCurrentProcess(),0xf01ff,out original));
+                Win32.Check(CreateRestrictedToken(original,4,0,IntPtr.Zero,0,IntPtr.Zero,0,IntPtr.Zero,out restricted));
+                Win32.Check(ConvertStringSidToSid("S-1-16-8192",out sid));
+                var label=new TokenLabel { sid=sid,attributes=0x20 };
+                Win32.Check(SetTokenInformation(restricted,25,ref label,Marshal.SizeOf(label)+GetLengthSid(sid)));
+                using(System.Security.Principal.WindowsImpersonationContext context=System.Security.Principal.WindowsIdentity.Impersonate(restricted)) {
+                    Assert(!SystemPolicy.Admin,"Browser test must use an ordinary, non-administrator token");
+                    return BrowserHost.Run(origin);
+                }
+            } finally { if(sid!=IntPtr.Zero) LocalFree(sid); if(restricted!=IntPtr.Zero) Win32.CloseHandle(restricted); if(original!=IntPtr.Zero) Win32.CloseHandle(original); }
+        }
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
         static void Assert(bool condition,string message) { if(!condition) throw new Exception(message); }
         static void Reject(string source) { bool rejected=false; try { bool migrate; Data.Parse(source,out migrate); } catch(Exception) { rejected=true; } Assert(rejected,"Invalid persisted config must fail closed"); }
         public static int Main(string[] args) {
+            try { return Run(args); }
+            catch(Exception error) { Console.Error.WriteLine("FAIL: "+error.Message); return 1; }
+        }
+        static int Run(string[] args) {
+            if(args.Length==1 && args[0]=="--assert-released") {
+                Config config=Data.Load();
+                foreach(Target target in config.apps) {
+                    foreach(var view in new[] { Microsoft.Win32.RegistryView.Registry64,Microsoft.Win32.RegistryView.Registry32 })
+                        using(var root=Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine,view))
+                        using(var key=root.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\"+Path.GetFileName(target.path)+"\\IPGuard_"+target.id)) Assert(key==null,"Explicit exit must remove the target's startup interception");
+                    using(var marker=Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\IPGuard\PackageDebugging\"+target.id)) Assert(marker==null,"Explicit exit must remove owned package-debug registration");
+                }
+                dynamic firewall=Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FwPolicy2",true));
+                foreach(dynamic rule in firewall.Rules) Assert((string)rule.Grouping!=SystemPolicy.Owner,"Explicit exit must remove its firewall rules");
+                Assert(File.Exists(Path.Combine(Data.DirectoryPath,"browser","released")),"Explicit exit must also release browser protection");
+                Console.WriteLine("PASS: no owned startup hook, package-debug marker or firewall rule remains after explicit release"); return 0;
+            }
+            if(args.Length==2 && args[0]=="--medium-native-host") return MediumHost(args[1]);
+            if(args.Length==2 && args[0]=="--hidden-window") {
+                using(Form window=new Form { Text="IP Guard hidden-window fixture",Width=480,Height=320 }) {
+                    window.Shown+=(sender,eventArgs)=>{window.Hide(); File.WriteAllText(args[1],window.Handle.ToInt64().ToString());};
+                    using(var timer=new System.Windows.Forms.Timer { Interval=20000 }) { timer.Tick+=(sender,eventArgs)=>window.Close(); timer.Start(); Application.Run(window); }
+                }
+                return 0;
+            }
             if(args.Length==3 && args[0]=="--resolve-upgraded-package") {
                 string resolved=PackagePolicy.ResolveInstalledPath(args[1]);
                 Assert(String.Equals(resolved,args[2],StringComparison.OrdinalIgnoreCase),"An upgraded app must resolve to the current user's registered package, preserving the executable entry");
@@ -21,6 +70,20 @@ namespace IpGuard {
             IntPtr emptyJob=Win32.NewJob("Local\\IPGuard-Test-"+Guid.NewGuid().ToString("D"));
             try { bool foreground; Assert(!WindowActivation.ShowProtectedWindow(emptyJob,out foreground) && !foreground,"An empty protected job must not select or focus unrelated windows"); }
             finally { Win32.CloseHandle(emptyJob); }
+            string windowFile=Path.Combine(Path.GetTempPath(),"ipg-window-"+Guid.NewGuid().ToString("N"));
+            IntPtr windowJob=Win32.NewJob("Local\\IPGuard-WindowTest-"+Guid.NewGuid().ToString("D"));
+            try {
+                using(Process fixture=Process.Start(new ProcessStartInfo(typeof(NativePolicyTests).Assembly.Location,"--hidden-window "+Data.Quote(windowFile)) { UseShellExecute=false })) {
+                    Win32.Check(Win32.AssignProcessToJobObject(windowJob,fixture.Handle));
+                    Stopwatch timeout=Stopwatch.StartNew(); while(!File.Exists(windowFile) && timeout.ElapsedMilliseconds<5000) Thread.Sleep(20);
+                    Assert(File.Exists(windowFile),"Hidden application window must initialize");
+                    IntPtr window=new IntPtr(Int64.Parse(File.ReadAllText(windowFile))); bool foreground;
+                    Assert(!IsWindowVisible(window),"Fixture must reproduce a process running with a hidden main window");
+                    Assert(WindowActivation.ShowProtectedWindow(windowJob,out foreground),"Managed start must restore the protected hidden main window instead of reporting a launch timeout");
+                    timeout.Restart(); while(!IsWindowVisible(window) && timeout.ElapsedMilliseconds<3000) Thread.Sleep(20);
+                    Assert(IsWindowVisible(window),"Managed start must actually make the hidden window visible");
+                }
+            } finally { Win32.TerminateJobObject(windowJob,0); Win32.CloseHandle(windowJob); File.Delete(windowFile); }
             var pendingLaunch=new LaunchAttempt { id="test" };
             Assert(pendingLaunch.phase=="starting" && pendingLaunch.Fail("activation denied") && !pendingLaunch.Complete("late success"),"Failed launch must be visible and cannot be overwritten by a late completion");
             var successfulLaunch=new LaunchAttempt(); Assert(successfulLaunch.Complete("visible window") && !successfulLaunch.Fail("late error"),"Successful launch must not be overwritten by a stale error");

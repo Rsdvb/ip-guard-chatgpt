@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
+import path from "node:path";
 
 const [option, endpoint, origin] = process.argv.slice(2);
 if (
@@ -71,8 +73,17 @@ process.stdin.on("data", (chunk) => {
       }
     }
   });
-  socket.on("error", () => {
-    send({ protocol: 3, appVersion: "", services: { claude: offline, chatgpt: offline } });
+  socket.on("error", (error) => {
+    const permission =
+      ["ENOENT", "ECONNREFUSED"].includes(error.code) &&
+      existsSync(path.join(path.dirname(endpoint), "browser-released"))
+        ? {
+            ...offline,
+            phase: "released",
+            reason: "IP Guard 已完全退出并解除防护；重新打开后恢复校验",
+          }
+        : offline;
+    send({ protocol: 3, appVersion: "", services: { claude: permission, chatgpt: permission } });
   });
   socket.on("close", finish);
 });

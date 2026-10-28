@@ -33,6 +33,11 @@ async function installNativeHost(worker: Worker) {
       const heartbeat = setInterval(() => {
         if (latest) emit(latest);
       }, 250);
+      Reflect.set(globalThis, "nativeTestStop", () => {
+        latest = undefined;
+        clearInterval(heartbeat);
+        disconnected.forEach((listener) => listener());
+      });
       return {
         onMessage: {
           addListener: (listener: (message: unknown) => void) => listeners.push(listener),
@@ -217,6 +222,68 @@ test("steady native heartbeats keep permissions without repeating tab scans and 
     expect(counts).toEqual({ scans: 0, badges: 0 });
     expect(await page.evaluate(() => Reflect.get(globalThis, "idleDomWrites"))).toBe(0);
     await expect(page.getByRole("status")).toHaveText("校验通过");
+  } finally {
+    await context?.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test("explicit exit releases both websites after disconnect while an unexpected disconnect still blocks", async ({
+  playwright,
+}) => {
+  const profile = await mkdtemp(path.join(tmpdir(), "ipg-release-"));
+  let context: BrowserContext | undefined;
+  try {
+    context = await playwright.chromium.launchPersistentContext(profile, {
+      channel: "chromium",
+      headless: true,
+      args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+    });
+    await context.route(/^https:\/\/(claude\.ai|chatgpt\.com)\//, (route) =>
+      route.fulfill({ contentType: "text/html", body: "<h1>Service destination</h1>" }),
+    );
+    const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+    await installNativeHost(worker);
+    const page = await context.newPage();
+    await page.goto(`chrome-extension://${new URL(worker.url()).host}/popup.html`, {
+      waitUntil: "networkidle",
+    });
+    await page.getByRole("button", { name: "重新连接", exact: true }).click();
+    await sendState(worker, "claude", true);
+    await expect(page.getByRole("status")).toHaveText("校验通过");
+    const stop = () =>
+      worker.evaluate(() => {
+        const method: unknown = Reflect.get(globalThis, "nativeTestStop");
+        if (typeof method !== "function") throw new Error("Missing native disconnect fixture");
+        Reflect.apply(method, globalThis, []);
+      });
+    await stop();
+    await expect(page.getByRole("status")).toHaveText("访问已阻断");
+    await page.getByRole("button", { name: "重新连接", exact: true }).click();
+    const permission = {
+      ...offlineBrowserPermission("IP Guard 已完全退出并解除防护"),
+      phase: "released",
+    };
+    await worker.evaluate(
+      (value) => {
+        const send: unknown = Reflect.get(globalThis, "nativeTestSend");
+        if (typeof send !== "function") throw new Error("Missing native transport");
+        Reflect.apply(send, globalThis, [value]);
+      },
+      browserStateSchema.parse({
+        protocol: 3,
+        appVersion: "0.14.2",
+        services: { claude: permission, chatgpt: permission },
+      }),
+    );
+    await expect(page.getByRole("status")).toHaveText("防护已解除");
+    await stop();
+    await page.waitForTimeout(4000);
+    for (const url of ["https://claude.ai/", "https://chatgpt.com/"]) {
+      await page.goto(url, { waitUntil: "networkidle" });
+      await expect(page).toHaveURL(url);
+      await expect(page.getByRole("heading", { name: "Service destination" })).toBeVisible();
+    }
   } finally {
     await context?.close();
     await rm(profile, { recursive: true, force: true });

@@ -6,14 +6,43 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Microsoft.Win32;
 
 namespace IpGuard {
     public static class BrowserHost {
-        static object Offline() { return new { phase="offline",currentIp="",expectedIp="",checkedAt="",reason="请运行新版 IP Guard，并更新浏览器扩展" }; }
+        static object Offline(string reason) { return new { phase="offline",currentIp="",expectedIp="",checkedAt="",reason=reason }; }
         const string Host="com.ipguard.browser";
         static string Manifest { get { return Path.Combine(Data.DirectoryPath,"browser",Host+".json"); } }
+        static string Released { get { return Path.Combine(Data.DirectoryPath,"browser","released"); } }
+        public static void SetReleased(bool released) {
+            if(!released) { if(File.Exists(Released)) File.Delete(Released); return; }
+            Directory.CreateDirectory(Path.GetDirectoryName(Released));
+            File.WriteAllText(Released,BuildInfo.Version,new UTF8Encoding(false));
+        }
         static string[] Browsers { get { return new[] { @"Software\Google\Chrome\NativeMessagingHosts\", @"Software\Microsoft\Edge\NativeMessagingHosts\" }; } }
+        [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string value,uint revision,out IntPtr descriptor,IntPtr size);
+        [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorDacl(IntPtr descriptor,out bool present,out IntPtr acl,out bool defaulted);
+        [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorSacl(IntPtr descriptor,out bool present,out IntPtr acl,out bool defaulted);
+        [DllImport("advapi32.dll")] static extern uint SetSecurityInfo(IntPtr handle,int kind,uint information,IntPtr owner,IntPtr group,IntPtr dacl,IntPtr sacl);
+        [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr value);
+        public static void SecurePipe(string name) {
+            SystemPolicy.RequireAdmin();
+            using(var pipe=new NamedPipeClientStream(".",name,PipeAccessRights.ReadWrite|PipeAccessRights.ChangePermissions|PipeAccessRights.TakeOwnership,PipeOptions.Asynchronous,TokenImpersonationLevel.Identification,HandleInheritability.None)) {
+                pipe.Connect(2000);
+                IntPtr descriptor;
+                Win32.Check(ConvertStringSecurityDescriptorToSecurityDescriptor("D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;"+SystemPolicy.Sid+")S:(ML;;NW;;;ME)",1,out descriptor,IntPtr.Zero));
+                try {
+                    bool present,defaulted; IntPtr dacl,sacl;
+                    Win32.Check(GetSecurityDescriptorDacl(descriptor,out present,out dacl,out defaulted));
+                    Win32.Check(GetSecurityDescriptorSacl(descriptor,out present,out sacl,out defaulted));
+                    uint result=SetSecurityInfo(pipe.SafePipeHandle.DangerousGetHandle(),1,0x80000014,IntPtr.Zero,IntPtr.Zero,dacl,sacl);
+                    if(result!=0) throw new System.ComponentModel.Win32Exception((int)result,"浏览器管道权限设置失败");
+                } finally { LocalFree(descriptor); }
+            }
+        }
         public static void Register(bool refreshOnly=false) {
             if(refreshOnly && !File.Exists(Manifest)) return;
             foreach(string browser in Browsers) using(RegistryKey existing=Registry.CurrentUser.OpenSubKey(browser+Host))
@@ -61,8 +90,10 @@ namespace IpGuard {
                             }
                         }
                     }
-                } catch(Exception) {
-                    try { Send(output,Data.Json().Serialize(new { protocol=3,appVersion=BuildInfo.Version,services=new { claude=Offline(),chatgpt=Offline() } })); } catch(IOException) { }
+                } catch(Exception error) {
+                    string reason=error is UnauthorizedAccessException ? "浏览器连接权限不足，请升级并重启 IP Guard" : "本地守护连接失败 · "+error.GetBaseException().Message;
+                    object permission=File.Exists(Released) && !(error is UnauthorizedAccessException) ? new { phase="released",currentIp="",expectedIp="",checkedAt="",reason="IP Guard 已完全退出并解除防护；重新打开后恢复校验" } : Offline(reason);
+                    try { Send(output,Data.Json().Serialize(new { protocol=3,appVersion=BuildInfo.Version,services=new { claude=permission,chatgpt=permission } })); } catch(IOException) { }
                     return 1;
                 }
             }

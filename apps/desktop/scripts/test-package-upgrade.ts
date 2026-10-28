@@ -165,6 +165,21 @@ async function guardian(expected: string) {
       );
       assert.equal(after.apps.find((app) => app.id === validId)?.path, valid);
     }
+    const saved = readFileSync(path.join(data, "settings.json"), "utf8");
+    await request("release-protection");
+    await request("release-protection");
+    assert.equal(
+      readFileSync(path.join(data, "settings.json"), "utf8"),
+      saved,
+      "Explicit exit must retain all IP rules and application selections",
+    );
+    const released = spawnSync(
+      path.join(root, "dist/NativePolicyTests.exe"),
+      ["--assert-released"],
+      { encoding: "utf8", timeout: 10000 },
+    );
+    assert.equal(released.status, 0, released.stdout + released.stderr);
+    console.log(released.stdout.trim());
     await request("shutdown");
     await once(child, "exit");
   } finally {

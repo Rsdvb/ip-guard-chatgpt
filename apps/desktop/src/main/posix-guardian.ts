@@ -653,6 +653,11 @@ export class PosixGuardian extends EventEmitter {
   }
   async request(action: string, payload: Record<string, unknown> = {}): Promise<Snapshot> {
     if (this.closed) throw new Error("守护程序正在退出");
+    if (action === "release-protection") {
+      await this.stop();
+      for (const target of this.config.apps) await this.launcher(target, false);
+      return this.snapshot;
+    }
     if (action === "browser:register") {
       await this.registerBrowser();
       return this.snapshot;

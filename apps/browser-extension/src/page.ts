@@ -114,19 +114,22 @@ async function render() {
       `https://github.com/Rsdvb/ip-guard-chatgpt/releases/download/v${latestVersion}/IP-Guard-Browser-${latestVersion}.zip`,
     );
   const rule = state?.services[selected()];
-  const phase = fresh && rule ? rule.phase : "offline";
+  const phase = rule?.phase === "released" ? "released" : fresh && rule ? rule.phase : "offline";
   permitted = Boolean(state && !shouldBlockUrl(destination(), state, fresh));
   open.textContent = `${blocked ? "返回" : "打开"} ${services[selected()].name}`;
   document.body.dataset.phase = phase;
-  element("status").textContent = permitted
-    ? "校验通过"
-    : phase === "paused"
-      ? "该服务已暂停"
-      : phase === "checking"
-        ? "正在检测"
-        : "访问已阻断";
+  element("status").textContent =
+    phase === "released"
+      ? "防护已解除"
+      : permitted
+        ? "校验通过"
+        : phase === "paused"
+          ? "该服务已暂停"
+          : phase === "checking"
+            ? "正在检测"
+            : "访问已阻断";
   element("reason").textContent = formatIPText(
-    fresh && rule ? rule.reason : "请运行 IP Guard 并准备浏览器扩展",
+    (fresh || phase === "released") && rule ? rule.reason : "请运行 IP Guard 并准备浏览器扩展",
     ipsVisible,
   );
   element("current").textContent = formatIPText(rule?.currentIp || "—", ipsVisible);

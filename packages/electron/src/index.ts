@@ -6,13 +6,13 @@ export * from "./services.ts";
 export * from "./browser-policy.ts";
 export * from "./extension-version.ts";
 
-export const nativeVersion = "0.14.1";
+export const nativeVersion = "0.14.2";
 export const nativeProtocol = 10;
 export const browserExtensionId = "blmgamidelconfabgilaacbkokomegep";
 export const browserHostName = "com.ipguard.browser";
 export const browserPermissionSchema = z
   .object({
-    phase: z.enum(["allowed", "blocked", "offline", "unlocked", "checking", "paused"]),
+    phase: z.enum(["allowed", "blocked", "offline", "unlocked", "checking", "paused", "released"]),
     currentIp: z.union([z.literal(""), z.ipv4()]),
     expectedIp: z.union([z.literal(""), z.ipv4()]),
     checkedAt: z.string(),
@@ -114,6 +114,7 @@ export const processStateSchema = z.object({
 });
 export type ProcessState = z.infer<typeof processStateSchema>;
 export const updateStateSchema = z.object({
+  canInstall: z.boolean().optional(),
   phase: z.enum([
     "unconfigured",
     "idle",
@@ -243,6 +244,7 @@ export const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("update:download") }),
   z.object({ action: z.literal("update:install") }),
   z.object({ action: z.literal("update:releases") }),
+  z.object({ action: z.literal("app:quit") }),
   z.object({ action: z.literal("extension:setup") }),
   z.object({ action: z.literal("extension:status") }),
 ]);

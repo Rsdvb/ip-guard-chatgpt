@@ -94,6 +94,8 @@ jobs:
             apps/desktop/release/*.zip
             apps/desktop/release/*.deb
             apps/desktop/release/*.tar.gz
+            apps/desktop/release/*.yml
+            apps/desktop/release/*.blockmap
             apps/web/test-results
             posix-validation.log
             platform.json

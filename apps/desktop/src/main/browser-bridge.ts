@@ -1,6 +1,7 @@
-import { chmod, unlink } from "node:fs/promises";
+import { chmod, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
+import path from "node:path";
 
 import { z } from "zod";
 
@@ -24,6 +25,8 @@ export class BrowserBridge {
   private guardian: Guardian;
   private endpoint = "";
   private lastMessage = "";
+  private error = "";
+  private released = false;
   private updates: ApplicationUpdates;
   constructor(guardian: Guardian, updates: ApplicationUpdates) {
     this.guardian = guardian;
@@ -41,6 +44,11 @@ export class BrowserBridge {
   private state(): BrowserState {
     const value = this.guardian.snapshot;
     const permission = (key: Service): BrowserPermission => {
+      if (this.released)
+        return {
+          ...offlineBrowserPermission("IP Guard 已完全退出并解除防护；重新打开后恢复校验"),
+          phase: "released",
+        };
       const rule = value?.services[key];
       if (!value?.online || !rule || this.guardian.error) return offlineBrowserPermission();
       const base = {
@@ -74,7 +82,14 @@ export class BrowserBridge {
 
   private async listen(endpoint: string) {
     if (this.server) return;
-    if (process.platform !== "win32") await preparePosixSocket(endpoint);
+    if (process.platform !== "win32") {
+      await preparePosixSocket(endpoint);
+      await unlink(path.join(path.dirname(endpoint), "browser-released")).catch(
+        (error: unknown) => {
+          if (!fileMissing(error)) throw error;
+        },
+      );
+    }
     const server = createServer((socket) => {
       if (this.clients.size >= 16) {
         socket.destroy();
@@ -120,7 +135,13 @@ export class BrowserBridge {
     });
     this.endpoint = endpoint;
     server.listen(endpoint, () => {
-      if (process.platform !== "win32")
+      if (process.platform === "win32")
+        void this.guardian.request("browser:permissions").catch((error: unknown) => {
+          this.error = error instanceof Error ? error.message : "浏览器管道权限设置失败";
+          console.error(this.error);
+          this.close();
+        });
+      else
         void chmod(endpoint, 0o600).catch((error: unknown) => {
           console.error(error);
           this.close();
@@ -149,6 +170,7 @@ export class BrowserBridge {
     const connections = this.clients.size;
     return {
       ...info,
+      error: this.error || info.error,
       connections,
       latestVersion,
       outdatedConnections: [...this.clients.values()].filter(
@@ -161,10 +183,27 @@ export class BrowserBridge {
           ? "running"
           : info.installedBrowsers.length
             ? "installed"
-            : info.error
+            : this.error || info.error
               ? "unknown"
               : "missing",
     };
+  }
+  async release() {
+    if (process.platform !== "win32" && this.endpoint)
+      await writeFile(path.join(path.dirname(this.endpoint), "browser-released"), "released", {
+        mode: 0o600,
+      });
+    this.released = true;
+    const message = `${JSON.stringify(this.state())}\n`;
+    await Promise.all(
+      [...this.clients.keys()].map(
+        (socket) =>
+          new Promise<void>((resolve) => {
+            if (socket.destroyed) return resolve();
+            socket.write(message, () => resolve());
+          }),
+      ),
+    );
   }
   close() {
     clearInterval(this.timer);

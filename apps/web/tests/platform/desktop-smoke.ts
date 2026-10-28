@@ -18,6 +18,7 @@ import {
 
 import { browserProfiles, registerPosixBrowser } from "../../../desktop/src/main/posix-browser.ts";
 import { sampleResources } from "./resource-sample.ts";
+import { testWindowsUpdates } from "./update-smoke.ts";
 
 if (process.platform === "win32" && process.env.GITHUB_ACTIONS !== "true")
   throw new Error("Windows packaged system test runs only in an isolated GitHub Actions VM");
@@ -99,11 +100,9 @@ try {
   }
   const launcher = path.join(profile, "browser/ipguard-native-host");
   nativeHost = spawn(
-    process.platform === "win32"
-      ? path.join(resources, "native", nativeVersion, "IpGuard.Native.exe")
-      : "/bin/sh",
+    process.platform === "win32" ? path.join(desktop, "dist/NativePolicyTests.exe") : "/bin/sh",
     [
-      ...(process.platform === "win32" ? [] : [launcher]),
+      ...(process.platform === "win32" ? ["--medium-native-host"] : [launcher]),
       `chrome-extension://${browserExtensionId}/`,
     ],
     {
@@ -151,6 +150,10 @@ try {
   assert.equal(browser.appVersion, nativeVersion);
   assert.equal(browser.services.claude.phase, "unlocked");
   assert.equal(browser.services.chatgpt.phase, "unlocked");
+  console.log(
+    "PASS: real Native Messaging from an ordinary browser token to the administrator desktop",
+  );
+  if (process.platform === "win32") await testWindowsUpdates(application, page, desktop);
   const foreground = await sampleResources(application.process().pid!, "foreground");
   await page.evaluate(() => {
     const bridge: unknown = Reflect.get(globalThis, "desktop");

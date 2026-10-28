@@ -1352,6 +1352,22 @@ export function GuardApp() {
                 <UpdatePanel />
                 <section className="panel settings-panel">
                   <div className="panel-heading">
+                    <h2>退出软件</h2>
+                  </div>
+                  <p className="field-help">
+                    关闭窗口后，软件会缩到托盘继续防护。完全退出会先结束受保护程序，再解除启动拦截和浏览器限制，保留
+                    IP 设置。
+                  </p>
+                  <button
+                    className="btn"
+                    disabled={!available || busy}
+                    onClick={() => void invoke({ action: "app:quit" })}
+                  >
+                    完全退出并解除防护
+                  </button>
+                </section>
+                <section className="panel settings-panel">
+                  <div className="panel-heading">
                     <h2>后台与启动</h2>
                   </div>
                   <div className="setting-row">

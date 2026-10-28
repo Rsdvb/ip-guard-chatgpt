@@ -12,7 +12,9 @@
 
 原 Windows 发布工作流保留在 `ci-templates/release.yml`。手动 CI `.github/workflows/posix-preview.yml` 检查三个平台、安装包与托盘资源；`.github/workflows/system-kernel.yml` 验证 Ubuntu 实际内核过滤和 Mac 原生组件，不自动发布。
 
-**[Windows 稳定版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/latest)** · **[Windows 最新修复版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.14.1)** · **[三平台测试版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.14.0)** · [快速开始](#快速开始) · [浏览器扩展](#浏览器扩展) · [开发构建](#开发构建) · [更新日志](CHANGELOG.zh.md) · [问题反馈](https://github.com/Rsdvb/ip-guard-chatgpt/issues)
+**[Windows 稳定版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/latest)** · **[Windows 最新修复版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.14.2)** · **[三平台测试版](https://github.com/Rsdvb/ip-guard-chatgpt/releases/tag/v0.14.0)** · [快速开始](#快速开始) · [浏览器扩展](#浏览器扩展) · [开发构建](#开发构建) · [更新日志](CHANGELOG.zh.md) · [问题反馈](https://github.com/Rsdvb/ip-guard-chatgpt/issues)
+
+**0.14.2 Windows 预览修复**解决浏览器权限导致的连接失败和隐藏应用窗口导致的启动误报，补全在线更新，并增加「完全退出并解除防护」。旧版首次手动覆盖安装；插件也需更新并在扩展管理页重新加载。Mac / Ubuntu 当前发布包仍为 0.14.0。
 
 ## 功能特性
 
@@ -56,6 +58,8 @@ Mac / Ubuntu 用户请先阅读 [测试版安装与能力边界](CROSS_PLATFORM.
 3. 关闭目标程序，在「受保护程序」中选择 Claude 预设或浏览 EXE，确认「归属服务」后添加，并开启程序防护开关。
 4. 从 IP Guard、原快捷方式或原终端命令启动程序。
 5. 按需开启「开机启动」。登录 Windows 后进入托盘；关闭主窗口继续后台防护。
+
+需要停止所有防护时，在设置或托盘菜单选择「完全退出并解除防护」。确认后结束受保护程序并解除启动拦截、网络和网页限制，原 IP 设置保留。下次打开 IP Guard 恢复防护；任务管理器强制结束、崩溃或断电仍按失联阻断处理。
 
 应用行显示「启动中」，等待受保护进程恢复并出现可见窗口；30 秒内未确认窗口或激活失败会显示原因，禁止重复提交同一程序。GUI 激活和校验窗口释放时显式交接前台权限，只尝试恢复本次受保护 Job 中的窗口；Windows 拒绝切换前台时会提示点击任务栏，不操作其他服务窗口。
 

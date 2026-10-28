@@ -35,6 +35,7 @@ namespace IpGuard {
         AdapterInfo[] adapters=new AdapterInfo[0];
         AdapterInfo watchedAdapter=new AdapterInfo { id="",name="正在检测网卡",exists=false };
         volatile bool quit;
+        volatile bool released;
         readonly AutoResetEvent networkWake=new AutoResetEvent(false);
         string topology="",detection="";
         static string ServiceName(string service) { return service=="claude" ? "Claude" : "ChatGPT"; }
@@ -155,6 +156,7 @@ namespace IpGuard {
             lock(state) foreach(Session s in AllSessions.Where(s => s.appId == id)) { s.stopped = true; Win32.TerminateJobObject(s.job, 1); }
         }
         void RefreshTargets(bool initializing=false) {
+            if(released) return;
             lock(actions) foreach(Target target in config.apps.ToArray()) RefreshTarget(target,initializing);
         }
         void RefreshTarget(Target target,bool initializing=false) {
@@ -208,7 +210,20 @@ namespace IpGuard {
                 if(action == "status") return Snapshot();
                 if(action == "check") { string key=input["service"] as string; Data.ValidateService(key); Check(key); return Snapshot(); }
                 SystemPolicy.RequireAdmin();
-                if(action=="lock" || action=="unlock" || action=="service:enable" || action=="failure-policy") {
+                if(action=="release-protection") {
+                    released=true;
+                    TripAll("正在完全退出并解除防护");
+                    var failures=new List<string>();
+                    foreach(Target target in config.apps.Where(t=>t.enabled)) {
+                        try { SystemPolicy.Unintercept(target); SystemPolicy.RemoveFirewall(target); }
+                        catch(Exception error) { failures.Add(target.name+" · "+error.GetBaseException().Message); }
+                    }
+                    if(failures.Count!=0) { released=false; RefreshTargets(true); throw new Exception("解除防护未完成，请重试："+String.Join("；",failures)); }
+                    BrowserHost.SetReleased(true);
+                    Log("info","已完全解除启动拦截和网页防护，IP 设置保留");
+                }
+                else if(action=="browser:permissions") { BrowserHost.SecurePipe("IPGuard-Browser-"+SystemPolicy.Sid); }
+                else if(action=="lock" || action=="unlock" || action=="service:enable" || action=="failure-policy") {
                     string key=input["service"] as string; Data.ValidateService(key);
                     ServiceRuntime r=runtimes[key];
                     lock(r.gate) {
@@ -332,11 +347,11 @@ namespace IpGuard {
             ServiceRuntime r=runtimes[service];
             while(!quit) {
                 try {
-                    if(Monitor.TryEnter(r.gate)) {
+                    if(!released && Monitor.TryEnter(r.gate)) {
                         try { Rule rule=config.services[service]; if(rule.enabled && rule.rulesLocked && (DateTime.UtcNow>=r.nextCheck || Interlocked.CompareExchange(ref r.checkRequested,0,0)==1)) CheckLocked(service); }
                         finally { Monitor.Exit(r.gate); }
                     }
-                    if(Monitor.TryEnter(actions)) { try { BlockPending(); } finally { Monitor.Exit(actions); } }
+                    if(!released && Monitor.TryEnter(actions)) { try { BlockPending(); } finally { Monitor.Exit(actions); } }
                 } catch(Exception e) { Observe(ServiceName(service)+" · 守护状态检测异常 · "+e.GetBaseException().Message); }
                 r.wake.WaitOne(500);
             }
@@ -417,6 +432,7 @@ namespace IpGuard {
                     }
                     bool inherited=request.ContainsKey("inherit") && request["inherit"] is bool && (bool)request["inherit"];
                     lock(actions) {
+                        if(released) throw new Exception("IP Guard 正在退出，启动拦截即将解除。");
                         target = Find(request["id"] as string);
                         lock(state) if(targetErrors.ContainsKey(target.id)) throw new Exception(targetErrors[target.id]);
                         lock(state) launches.TryGetValue(target.id,out launchAttempt);
@@ -487,6 +503,7 @@ namespace IpGuard {
             } catch(IOException e) { Log("info", "启动连接已关闭 · " + e.Message); }
         }
         public void Run() {
+            BrowserHost.SetReleased(false);
             try { BrowserHost.Register(true); } catch(Exception error) { Log("error","浏览器连接注册失败 · "+error.Message); }
             if(config.apps.Any(t => t.enabled) && SystemPolicy.Admin) {
                 TripAll("守护程序已启动，等待重新校验");
@@ -512,7 +529,7 @@ namespace IpGuard {
                 }
             } finally {
                 quit=true; probe.Stop(); commands.CompleteAdding(); TripAll("守护程序已退出，受保护程序已结束");
-                lock(actions) BlockPending();
+                if(!released) lock(actions) BlockPending();
                 NetworkChange.NetworkAddressChanged -= NetworkChanged; NetworkChange.NetworkAvailabilityChanged -= AvailabilityChanged; SystemEvents.PowerModeChanged -= PowerChanged;
                 wifi.Dispose();
             }

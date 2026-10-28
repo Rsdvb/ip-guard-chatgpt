@@ -27,10 +27,21 @@ let badge = "";
 const fresh = () => Date.now() - lastHeartbeat >= 0 && Date.now() - lastHeartbeat < 3500;
 const offline = (reason: string): BrowserState => ({
   ...state,
-  services: { claude: offlineBrowserPermission(reason), chatgpt: offlineBrowserPermission(reason) },
+  services: {
+    claude:
+      state.services.claude.phase === "released"
+        ? state.services.claude
+        : offlineBrowserPermission(reason),
+    chatgpt:
+      state.services.chatgpt.phase === "released"
+        ? state.services.chatgpt
+        : offlineBrowserPermission(reason),
+  },
 });
 const allowed = () =>
-  Object.values(state.services).every((rule) => rule.phase === "allowed") && fresh();
+  Object.values(state.services).every(
+    (rule) => rule.phase === "released" || (rule.phase === "allowed" && fresh()),
+  );
 async function blockTabs() {
   const tabs = await chrome.tabs.query({
     url: allServiceDomains().flatMap((domain) => [`*://${domain}/*`, `*://*.${domain}/*`]),
@@ -131,7 +142,8 @@ function connect() {
     const reason = chrome.runtime.lastError?.message;
     if (port !== next) return;
     port = undefined;
-    state = offline(reason ? "请在新版 IP Guard 设置中准备浏览器扩展" : "IP Guard 连接已断开");
+    const detail = state.services.claude.phase === "offline" ? state.services.claude.reason : "";
+    state = offline(detail || (reason ? `本地连接失败 · ${reason}` : "IP Guard 连接已断开"));
     void publish();
     reconnect = setTimeout(connect, 3000);
   });

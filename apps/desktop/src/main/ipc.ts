@@ -31,6 +31,7 @@ export const setupIpc = (
   updates: ApplicationUpdates,
   browser: BrowserBridge,
   systemProtection: SystemProtection,
+  quitAndRelease: () => Promise<boolean>,
 ) => {
   const sendVisible = (channel: string, value: unknown) => {
     for (const window of BrowserWindow.getAllWindows())
@@ -108,6 +109,7 @@ export const setupIpc = (
       return {};
     }
     if (command.action === "update:status") return { appUpdate: updates.state };
+    if (command.action === "app:quit") return { cancelled: !(await quitAndRelease()) };
     if (command.action === "update:check") return { appUpdate: await updates.check() };
     if (command.action === "update:download") return { appUpdate: await updates.download() };
     if (command.action === "update:install") return { appUpdate: await updates.install() };

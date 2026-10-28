@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
-const repository = process.env.GITHUB_REPOSITORY ?? "";
+const repository = process.env.GITHUB_REPOSITORY ?? "Rsdvb/ip-guard-chatgpt";
 if (repository && !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(repository))
   throw new Error("Invalid GITHUB_REPOSITORY");
 writeFileSync(path.join(root, "dist/release-info.json"), JSON.stringify({ repository }), "utf8");
