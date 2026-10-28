@@ -39,7 +39,7 @@ type engine struct {
 	enabled    bool
 	policy     Policy
 	groups     map[string]*group
-	marked     map[string]bool
+	marked     map[string]string
 	fan        int
 	lastLease  uint64
 	expired    bool
@@ -70,7 +70,7 @@ func saveState(file string, s diskState) error {
 	return os.Rename(file+".tmp", file)
 }
 func newEngine(uid uint32, file string) (*engine, error) {
-	e := &engine{uid: uid, file: file, policy: Policy{Format: 1, UID: uid, Targets: []Target{}}, groups: map[string]*group{}, marked: map[string]bool{}, fan: -1, closed: make(chan struct{})}
+	e := &engine{uid: uid, file: file, policy: Policy{Format: 1, UID: uid, Targets: []Target{}}, groups: map[string]*group{}, marked: map[string]string{}, fan: -1, closed: make(chan struct{})}
 	data, err := os.ReadFile(file)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -110,9 +110,6 @@ func validateExecutable(t Target, uid uint32) error {
 	real, err := filepath.EvalSymlinks(t.Executable)
 	if err != nil {
 		return err
-	}
-	if real != t.Executable {
-		return errors.New("select the resolved executable path")
 	}
 	info, err := os.Stat(real)
 	if err != nil {
@@ -167,10 +164,16 @@ func (e *engine) configure(p Policy, save bool) error {
 			e.fan = fd
 		}
 		wanted := map[string]bool{}
-		directories := map[string]bool{}
+		directories := map[string]string{}
 		for _, t := range p.Targets {
 			wanted[t.ID] = true
-			directories[filepath.Dir(t.Executable)] = true
+			for _, name := range []string{t.Executable, filepath.Dir(t.Executable)} {
+				var st unix.Stat_t
+				if err := unix.Stat(name, &st); err != nil {
+					return err
+				}
+				directories[strconv.FormatUint(uint64(st.Dev), 10)] = name
+			}
 			if e.groups[t.ID] == nil {
 				g, err := newGroup(e.uid, t.ID)
 				if err != nil {
@@ -179,14 +182,15 @@ func (e *engine) configure(p Policy, save bool) error {
 				e.groups[t.ID] = g
 			}
 		}
-		for directory := range directories {
-			if e.marked[directory] {
+		for device, directory := range directories {
+			if _, ok := e.marked[device]; ok {
+				e.marked[device] = directory
 				continue
 			}
-			if err := unix.FanotifyMark(e.fan, unix.FAN_MARK_ADD, unix.FAN_OPEN_EXEC_PERM|unix.FAN_EVENT_ON_CHILD, unix.AT_FDCWD, directory); err != nil {
+			if err := unix.FanotifyMark(e.fan, unix.FAN_MARK_ADD|unix.FAN_MARK_FILESYSTEM, unix.FAN_OPEN_EXEC_PERM, unix.AT_FDCWD, directory); err != nil {
 				return err
 			}
-			e.marked[directory] = true
+			e.marked[device] = directory
 		}
 		if save {
 			if err := saveState(e.file, diskState{Enabled: true, Policy: bound}); err != nil {
@@ -199,10 +203,10 @@ func (e *engine) configure(p Policy, save bool) error {
 				delete(e.groups, id)
 			}
 		}
-		for directory := range e.marked {
-			if !directories[directory] {
-				_ = unix.FanotifyMark(e.fan, unix.FAN_MARK_REMOVE, unix.FAN_OPEN_EXEC_PERM|unix.FAN_EVENT_ON_CHILD, unix.AT_FDCWD, directory)
-				delete(e.marked, directory)
+		for device, directory := range e.marked {
+			if _, ok := directories[device]; !ok {
+				_ = unix.FanotifyMark(e.fan, unix.FAN_MARK_REMOVE|unix.FAN_MARK_FILESYSTEM, unix.FAN_OPEN_EXEC_PERM, unix.AT_FDCWD, directory)
+				delete(e.marked, device)
 			}
 		}
 		e.policy = bound
@@ -247,7 +251,8 @@ func (e *engine) adopt() error {
 		}
 		processes[pid] = p
 		for _, t := range e.policy.Targets {
-			if p.executable == t.Executable {
+			real, _ := filepath.EvalSymlinks(t.Executable)
+			if p.executable == real {
 				selected[pid] = t.ID
 			}
 		}
@@ -363,7 +368,7 @@ func (e *engine) detach() {
 		g.close(true)
 	}
 	e.groups = map[string]*group{}
-	e.marked = map[string]bool{}
+	e.marked = map[string]string{}
 	e.bindings = nil
 }
 func (e *engine) close(detach bool) {
@@ -392,14 +397,14 @@ func (e *engine) permission(fd, pid int) uint32 {
 	if !e.enabled {
 		return unix.FAN_ALLOW
 	}
-	file, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
-	if err != nil {
+	var opened unix.Stat_t
+	if err := unix.Fstat(fd, &opened); err != nil {
 		return unix.FAN_DENY
 	}
-	file = strings.TrimSuffix(file, " (deleted)")
 	var target *Target
 	for i := range e.policy.Targets {
-		if e.policy.Targets[i].Executable == file {
+		var selected unix.Stat_t
+		if unix.Stat(e.policy.Targets[i].Executable, &selected) == nil && selected.Dev == opened.Dev && selected.Ino == opened.Ino {
 			target = &e.policy.Targets[i]
 			break
 		}
@@ -408,11 +413,7 @@ func (e *engine) permission(fd, pid int) uint32 {
 		return unix.FAN_ALLOW
 	}
 	p, err := readProcess(pid)
-	// A newly executing process can still expose its previous image; only its effective UID matters here.
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, unix.ESRCH) {
-			return unix.FAN_DENY
-		}
 		return unix.FAN_DENY
 	}
 	if p.uid != e.uid {

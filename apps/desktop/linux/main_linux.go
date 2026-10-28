@@ -227,6 +227,12 @@ func main() {
 	if os.Geteuid() != 0 {
 		log.Fatal("system helper requires system authorization; run the GUI as an ordinary user")
 	}
+	if len(os.Args) == 2 && os.Args[1] == "recover-all" {
+		if err := recoverAll(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if len(os.Args) != 3 {
 		log.Fatal("usage: ipguard-system daemon|enable UID")
 	}
@@ -239,6 +245,8 @@ func main() {
 		err = runDaemon(uint32(id))
 	case "enable":
 		err = enable(uint32(id))
+	case "recover":
+		err = recoverUser(uint32(id))
 	default:
 		err = errors.New("unknown system operation")
 	}

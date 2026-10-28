@@ -74,6 +74,11 @@ func TestKernelLaunchAndNetworkIsolation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for _, name := range []string{"claude", "chatgpt"} {
+		if err = os.Symlink(filepath.Join(root, name), filepath.Join(root, name+"-alias")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -118,8 +123,8 @@ func TestKernelLaunchAndNetworkIsolation(t *testing.T) {
 	}
 	defer e.close(true)
 	policy := Policy{Format: 1, UID: uid, Targets: []Target{
-		{ID: "00000000-0000-4000-8000-000000000071", Service: "claude", Executable: filepath.Join(root, "claude"), Allowed: true, KeepRunning: true},
-		{ID: "00000000-0000-4000-8000-000000000072", Service: "chatgpt", Executable: filepath.Join(root, "chatgpt"), Allowed: true, KeepRunning: true},
+		{ID: "00000000-0000-4000-8000-000000000071", Service: "claude", Executable: filepath.Join(root, "claude-alias"), Allowed: true, KeepRunning: true},
+		{ID: "00000000-0000-4000-8000-000000000072", Service: "chatgpt", Executable: filepath.Join(root, "chatgpt-alias"), Allowed: true, KeepRunning: true},
 	}}
 	var policyMu sync.Mutex
 	publish := func() error {
