@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { access, mkdtemp, realpath, readFile, unlink, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -43,8 +44,21 @@ const launchEnvironment = {
   ...process.env,
   ...(process.platform === "win32" ? { __COMPAT_LAYER: "RunAsInvoker" } : {}),
 };
+const testRequire = createRequire(import.meta.url);
+const playwrightRequire = createRequire(
+  createRequire(testRequire.resolve("@playwright/test")).resolve("playwright"),
+);
+const loader = path.join(
+  path.dirname(playwrightRequire.resolve("playwright-core/package.json")),
+  "lib/server/electron/loader.js",
+);
+await access(loader);
+// Packaged executables need the same ready barrier as Playwright's default Electron launcher;
+// otherwise Windows can create its first renderer before automation subscribes to it.
+const automationArgs = ["-r", loader];
 const application = await _electron.launch({
   executablePath: executable,
+  args: automationArgs,
   env: { ...launchEnvironment, IP_GUARD_USER_DATA_DIR: profile },
   timeout: 30000,
 });
@@ -247,7 +261,7 @@ try {
 const backgroundProfile = await realpath(await mkdtemp(path.join(tmpdir(), "ipg-tray-")));
 const backgroundApp = await _electron.launch({
   executablePath: executable,
-  args: ["--background"],
+  args: [...automationArgs, "--background"],
   env: { ...launchEnvironment, IP_GUARD_USER_DATA_DIR: backgroundProfile },
   timeout: 30000,
 });

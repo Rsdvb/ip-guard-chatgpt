@@ -144,6 +144,8 @@ export async function sampleResources(pid: number, scope: string) {
     rssMiB: result.reduce((sum, item) => sum + item.rss, 0) / 1048576,
     processes: result.length,
     includesNativeChildren: true,
+    cpuSamplingLimit:
+      "Process CPU deltas at interval endpoints; short-lived tasks between endpoints may be missed",
     includesRootSystemGuardian:
       process.platform === "linux" && Boolean(process.env.IP_GUARD_EXPECT_SYSTEM),
     configuration: "idle, no registered programs; CI VM measurement",
